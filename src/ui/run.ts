@@ -138,7 +138,7 @@ export class RunController {
       this.data.append(m);
       this.onUpdate();
     };
-    this.worker.onerror = (e) => { this.fail(`Simulation worker error: ${e.message}`); };
+    this.worker.onerror = (e) => { e.preventDefault?.(); this.fail(e.message ? `Simulation worker error: ${e.message}` : 'The simulation worker could not load. This happens when LFSim was updated while the page was open: reload the page (your work is autosaved).'); };
     this.worker.postMessage({ type: 'start', runId: this.runId, ...start } satisfies StartMsg);
   }
 
