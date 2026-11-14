@@ -38,6 +38,7 @@ export class Simulation {
   offLineCount = 0;
   isOffLine = false;
   dutyL = 0; dutyR = 0;
+  brakeL = false; brakeR = false; // short brake at zero duty (set by the firmware driver model)
   trail: TrailPoint[] = [];
   events: SimEvent[] = [];
   history: Record<string, number>[] = []; // sampled every 10 ms for graphs
@@ -134,7 +135,7 @@ export class Simulation {
     const b = this.body;
     const px = b.x, py = b.y;
     const h = TICK / SUB;
-    for (let k = 0; k < SUB; k += 1) this.physics.step(b, this.dutyL, this.dutyR, h);
+    for (let k = 0; k < SUB; k += 1) this.physics.step(b, this.dutyL, this.dutyR, h, this.brakeL, this.brakeR);
     this.time += TICK;
     this.distance += Math.hypot(b.x - px, b.y - py);
 

@@ -116,15 +116,22 @@ export class FirmwareBrain implements Brain {
     const w = this.wiring.driver;
     const lvl = (p: number) => this.pinLevel.get(p) ?? 0;
     const stby = w.standby === null ? 1 : lvl(w.standby);
+    const tb = this.profile.driver === 'TB6612FNG';
+    // Driver truth tables. TB6612FNG: IN1/IN2 = H/L or L/H drives with PWM high and SHORT-BRAKES with PWM low;
+    // H/H short-brakes; L/L or STBY low coasts. L298N (PWM on EN): IN1 = IN2 with EN high is a fast stop (brake);
+    // EN low coasts.
     const side = (pwm: number, in1: number, in2: number, inv: boolean) => {
       const duty = this.pwmPinDuty.get(pwm) ?? (lvl(pwm) ? 1 : 0);
       const a = lvl(in1), b = lvl(in2);
-      let d = 0;
-      if (stby && a && !b) d = duty; else if (stby && !a && b) d = -duty; // both high = brake, both low = coast: no drive
-      return inv ? -d : d;
+      let d = 0, brake = false;
+      if (stby && a && !b) d = duty; else if (stby && !a && b) d = -duty;
+      if (stby && a && b) brake = tb || duty > 0;
+      else if (stby && a !== b && duty === 0) brake = tb;
+      return { d: inv ? -d : d, brake };
     };
-    this.sim.dutyL = side(w.leftPwm, w.leftIn1, w.leftIn2, w.leftInvert);
-    this.sim.dutyR = side(w.rightPwm, w.rightIn1, w.rightIn2, w.rightInvert);
+    const L = side(w.leftPwm, w.leftIn1, w.leftIn2, w.leftInvert), R = side(w.rightPwm, w.rightIn1, w.rightIn2, w.rightInvert);
+    this.sim.dutyL = L.d; this.sim.dutyR = R.d;
+    this.sim.brakeL = L.brake; this.sim.brakeR = R.brake;
   }
 
   // ---------------- encoders (interrupts on channel A, B gives direction) ----------------

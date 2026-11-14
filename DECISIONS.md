@@ -21,4 +21,4 @@
 | 2026-11-14 | "Code saw the finish" = both motors held at zero for 0.5 s after 30 cm | Works for any firmware without a special API call |
 | 2026-11-14 | Dependencies added: uPlot (graphs), gifenc (GIF export) | Small, maintained, no network use; WebM uses the browser's MediaRecorder |
 | 2026-11-14 | Firmware runs in the per-run simulation worker with network and storage globals removed | Spec requires a sandbox; one worker per run keeps runs isolated |
-
+| 2026-11-14 | Code mode: TB6612FNG short-brakes at zero PWM with a direction set (and on IN1 = IN2 = high); L298N brakes on IN1 = IN2 with EN high; STBY low or IN1 = IN2 = low coasts | Datasheet truth tables. Before this, zero duty always coasted, so a firmware that clamps the inside wheel to 0 turned far wider than the real robot |

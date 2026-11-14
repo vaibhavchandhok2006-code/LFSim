@@ -94,18 +94,20 @@ export class Physics {
     return Math.round(d * steps) / steps;
   }
 
-  private motorCurrent(m: MotorDerived, duty: number, w: number, vb: number): number {
+  private motorCurrent(m: MotorDerived, duty: number, w: number, vb: number, brake: boolean): number {
     // Average H-bridge output voltage, minus the driver drop, against back-EMF.
+    // Between pulses the TB6612FNG shorts the motor (drive/brake PWM), so the average model holds down to duty 0.
     const vApplied = duty * vb;
     const drop = Math.sign(vApplied) * Math.min(Math.abs(vApplied), this.drv.fixedDrop);
     let i = (vApplied - drop - m.Ke * w) / (m.R + this.drv.rOn);
-    if (duty === 0) i = 0; // coast: both driver outputs off, no current flows
+    if (duty === 0 && !brake) i = 0; // coast: driver outputs off (high impedance), no current flows
+    // duty 0 with brake: terminals shorted through the driver, back-EMF drives a braking current
     const lim = this.drv.maxCurrent;
     return Math.max(-lim, Math.min(lim, i));
   }
 
   // Advance by dt seconds with the given PWM duties (-1..1). Call with dt <= 0.5 ms.
-  step(s: BodyState, dutyL: number, dutyR: number, dt: number): void {
+  step(s: BodyState, dutyL: number, dutyR: number, dt: number, brakeL = false, brakeR = false): void {
     const p = this.p;
     const dL = this.quantise(dutyL), dR = this.quantise(dutyR);
 
@@ -115,8 +117,8 @@ export class Physics {
     const draw = Math.abs(s.iL * dL) + Math.abs(s.iR * dR);
     s.vBatt = this.flags.batterySag ? vOpen - p.battery.internalR_ohm * draw : p.battery.fullV;
 
-    s.iL = this.motorCurrent(this.mL, dL, s.wL, s.vBatt);
-    s.iR = this.motorCurrent(this.mR, dR, s.wR, s.vBatt);
+    s.iL = this.motorCurrent(this.mL, dL, s.wL, s.vBatt, brakeL);
+    s.iR = this.motorCurrent(this.mR, dR, s.wR, s.vBatt, brakeR);
     s.used_mAh += (draw * dt * 1000) / 3600;
     const fric = (m: MotorDerived, w: number) => m.tauF * Math.tanh(w / 0.5);
     const tauL = this.mL.Kt * s.iL - fric(this.mL, s.wL);
