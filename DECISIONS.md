@@ -14,3 +14,11 @@
 | 2026-11-14 | Recording cap of 10 minutes of simulated time per run | Memory limit for recorded frames; not a rule-based auto-stop. The run is marked "recording limit reached" |
 | 2026-11-14 | Code-mode firmware format: async JavaScript (`await` on hardware calls) | Lets `delay()` block the robot's code while physics continues, and lets `while(1)` loops (common in ESP-IDF) run without freezing the browser |
 | 2026-11-14 | Start-square re-entry (abort) is judged on the robot's axle centre, not its front edge | A robot spinning at a junction near the start swings its nose over the square; a judge counts the robot driving back in, not a nose overhang |
+| 2026-11-14 | Spec maze targets scaled by 1872/2048 in tests | Spec numbers were measured on the maze span; LFSim maps the full image edge to 2.5 m |
+| 2026-11-14 | Trémaux matches revisited junctions by position (15 cm) and branch shape | Odometry drifts; shape stops two nearby junctions being merged |
+| 2026-11-14 | Frames are recorded at the brain's loop rate (firmware: 1 kHz) | Keeps CSV and graphs at the robot's own rate without storing every 0.25 ms sub-step |
+| 2026-11-14 | Firmware calls cost simulated CPU time (analogRead 10 µs, other calls ~0.5 µs, loop 5 µs) | Loop rate then comes from the code, as on the real board |
+| 2026-11-14 | "Code saw the finish" = both motors held at zero for 0.5 s after 30 cm | Works for any firmware without a special API call |
+| 2026-11-14 | Dependencies added: uPlot (graphs), gifenc (GIF export) | Small, maintained, no network use; WebM uses the browser's MediaRecorder |
+| 2026-11-14 | Firmware runs in the per-run simulation worker with network and storage globals removed | Spec requires a sandbox; one worker per run keeps runs isolated |
+
