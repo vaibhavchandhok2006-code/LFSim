@@ -1,0 +1,30 @@
+# LFSim — project instructions
+
+Source of truth: `docs/LFSim_Spec_v1.pdf` (spec v1, 14 Nov 2026), then `PRD.md`, then `DECISIONS.md`.
+
+## Commands
+- `npm run dev` — dev server
+- `npm test` — Vitest (physics, sensors, track import, graph, algorithms, code mode)
+- `npm run build` — type-check + production build to `dist/`
+- Deploy: push to `main`; GitHub Actions builds and publishes to GitHub Pages.
+
+## Architecture boundaries (do not break)
+- `src/sim/` physics, sensors, simulation loop. No React, no DOM.
+- `src/brain/` robot brains. They see the robot ONLY through `BrainIO` / the firmware hardware API.
+  Never pass the track, the junction graph or the finish position to a brain.
+- `src/track/` image import, darkness map, junction graph. The graph is for overlays, the ideal path and validation only.
+- `src/worker/` the simulation worker and the sandboxed firmware worker.
+- `src/ui/` React components. Rendering only; no physics.
+- Fixed 1 kHz simulation step, SI units internally (m, s, kg, N, rad, V, A). Convert at the UI boundary.
+- Seeded randomness (`Rng`) everywhere so runs are reproducible.
+
+## Conventions
+- Units in names: `_mm`, `_cm`, `_m`, `_s`, `_Hz`, `_V`.
+- Every estimate is labelled as an estimate in the UI and editable.
+- No auto-stop: a run ends at the finish (timer), when the brain stops, or on the user's Stop. Recording has a technical cap (see DECISIONS.md).
+- No backend, no network calls, no analytics.
+- Imported files are untrusted: validate schema version, types, ranges and sizes.
+
+## Safety
+- Never force-push or rewrite history. Commit focused checkpoints.
+- Firmware code runs only in the sandbox worker, never on the main thread.

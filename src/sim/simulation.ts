@@ -1,7 +1,7 @@
 // The simulation loop: fixed 1 kHz ticks (4 physics sub-steps each), the brain called at its own loop rate,
 // run timing per the rulebook, off-line detection, and the path trail.
 
-import { Brain, BrainIO } from '../brain/brain';
+import { Brain, BrainIO, DecisionRecord } from '../brain/brain';
 import { Track, inRect, distanceToLine } from '../track/track';
 import { BodyState, initialBody, Physics, PhysicsFlags } from './physics';
 import { RobotProfile } from './profile';
@@ -14,6 +14,8 @@ export interface OffLineRule { distance_cm: number }
 
 export interface TrailPoint { x: number; y: number; v: number; off: boolean }
 export interface SimEvent { t: number; kind: 'start' | 'finish' | 'offline' | 'online' | 'brain-finished' | 'log' | 'left-mat' | 'aborted'; text: string; x: number; y: number }
+
+export interface DecisionEvent extends DecisionRecord { t: number; x: number; y: number }
 
 export type RunStatus = 'ready' | 'running' | 'finished' | 'stopped';
 
@@ -39,13 +41,16 @@ export class Simulation {
   trail: TrailPoint[] = [];
   events: SimEvent[] = [];
   history: Record<string, number>[] = []; // sampled every 10 ms for graphs
+  decisions: DecisionEvent[] = [];
+  readonly memory: Record<string, unknown>; // EEPROM/NVS contents, kept for a memory run
   private nextBrain = 0;
   private nextSample = 0;
   private io: BrainIO;
   private leftMat = false;
 
-  constructor(track: Track, profile: RobotProfile, brain: Brain, flags: SimFlags = DEFAULT_FLAGS, offRule: OffLineRule = { distance_cm: 4 }) {
+  constructor(track: Track, profile: RobotProfile, brain: Brain, flags: SimFlags = DEFAULT_FLAGS, offRule: OffLineRule = { distance_cm: 4 }, memory: Record<string, unknown> = {}) {
     this.track = track;
+    this.memory = memory;
     this.profile = profile;
     this.physics = new Physics(profile, flags);
     this.sensors = new SensorArray(profile, flags);
@@ -68,6 +73,18 @@ export class Simulation {
       whiteRaw: s.whiteRaw,
       blackRaw: s.blackRaw,
       threshold: s.threshold,
+      geometry: { wheelbase_mm: this.profile.wheelbase_mm, wheelDiameter_mm: this.profile.wheelDiameter_mm, sensorOffset_mm: this.profile.sensorOffset_mm },
+      wheelOdometry: () => {
+        const r = sim.physics.wheelR;
+        const e = sim.profile.encoders;
+        if (e.present && e.usedInCode) {
+          const k = e.cpr / (2 * Math.PI);
+          return { left_m: (Math.floor(sim.body.angL * k) / k) * r, right_m: (Math.floor(sim.body.angR * k) / k) * r };
+        }
+        return { left_m: sim.body.angL * r, right_m: sim.body.angR * r };
+      },
+      memory: this.memory,
+      decision: (rec) => { sim.decisions.push({ ...rec, t: sim.time, x: sim.body.x, y: sim.body.y }); },
       readSensors: () => sim.sensors.read(sim.track, sim.body.x, sim.body.y, sim.body.theta).slice(),
       nowMs: () => sim.time * 1000,
       setMotors: (l, r) => { sim.dutyL = l; sim.dutyR = r; },
@@ -77,7 +94,7 @@ export class Simulation {
         const k = e.cpr / (2 * Math.PI);
         return { left: Math.floor(sim.body.angL * k), right: Math.floor(sim.body.angR * k), cpr: e.cpr };
       },
-      odometry_m: () => sim.distance,
+      odometry_m: () => (sim.body.angL + sim.body.angR) / 2 * sim.physics.wheelR,
       log: (msg) => sim.event('log', msg),
     };
   }
@@ -127,8 +144,9 @@ export class Simulation {
     if (this.startTime !== null && this.finishTime === null && inRect(this.track, this.track.finish, fx, fy)) {
       this.finishTime = this.time; this.event('finish', 'Front edge entered the finish square');
     }
-    // Rulebook: re-entering the start square before the finish aborts the run.
-    if (this.startTime !== null && this.finishTime === null && this.distance > 0.3 && inRect(this.track, this.track.start, fx, fy)) {
+    // Rulebook: re-entering the start square before the finish aborts the run. Judged on the robot's centre
+    // (wheel axle), so a nose swinging over the square during a turn does not count.
+    if (this.startTime !== null && this.finishTime === null && this.distance > 0.3 && inRect(this.track, this.track.start, b.x, b.y)) {
       this.event('aborted', 'Re-entered the start square — run aborted (rulebook)');
       this.status = 'stopped';
       return;
