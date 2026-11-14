@@ -4,6 +4,17 @@
 import { DEFAULT_PROFILE, RobotProfile } from '../sim/profile';
 import { DEFAULT_SETTINGS, SettingsParams } from '../brain/settings';
 import { DEFAULT_FLAGS, SimFlags } from '../sim/simulation';
+import { Disturbances, Wiring } from '../worker/protocol';
+import { SAMPLE_WIRING } from '../brain/sampleFirmware';
+import type { RunSummary } from './run';
+
+export interface CodeSetup {
+  source: string;        // original firmware (for the side-by-side view)
+  sourceLang: string;    // e.g. "Arduino C++ (ESP32)"
+  translated: string;    // LFSim firmware JavaScript
+  notes: string;         // translation notes from the skill
+  wiring: Wiring;
+}
 
 export interface TrackSetup {
   presetId: 'roborun' | 'custom';
@@ -20,6 +31,10 @@ export interface AppSettings {
   flags: SimFlags;
   offLine_cm: number;
   track: TrackSetup;
+  brainMode: 'settings' | 'code';
+  code: CodeSetup;
+  disturbances: Disturbances;
+  theme: 'light' | 'dark';
 }
 
 export const DEFAULT_TRACK_SETUP: TrackSetup = {
@@ -37,6 +52,10 @@ export const DEFAULTS: AppSettings = {
   flags: DEFAULT_FLAGS,
   offLine_cm: 4,
   track: DEFAULT_TRACK_SETUP,
+  brainMode: 'settings',
+  code: { source: '', sourceLang: '', translated: '', notes: '', wiring: SAMPLE_WIRING },
+  disturbances: { lighting: { on: false, strength: 0.5 }, bumps: { on: false, strength: 0.5 }, seed: 7 },
+  theme: 'light',
 };
 
 const KEY = 'lfsim.settings.v1';
@@ -104,6 +123,15 @@ export interface ProjectFile {
   version: 1;
   settings: AppSettings;
   trackImage: string | null; // data URL
+  runs: RunSummary[];
+  memory: Record<string, unknown> | null;
+}
+
+export interface TrackFile {
+  lfsim: 'track';
+  version: 1;
+  setup: TrackSetup;
+  image: string; // data URL
 }
 
 export function blobToDataUrl(b: Blob): Promise<string> {
@@ -123,9 +151,64 @@ export function download(name: string, data: Blob | string, type = 'application/
   setTimeout(() => URL.revokeObjectURL(a.href), 1000);
 }
 
-export function parseImport(text: string): { kind: 'project' | 'robot'; value: ProjectFile | RobotProfile } {
-  const j = JSON.parse(text);
-  if (j && j.lfsim === 'project') return { kind: 'project', value: j as ProjectFile };
-  if (j && j.version === 1 && typeof j.wheelbase_mm === 'number') return { kind: 'robot', value: merge(DEFAULT_PROFILE, j) };
-  throw new Error('This file is not an LFSim project (.lfsim.json) or robot profile (.robot.json).');
+export const MAX_IMPORT_BYTES = 40 * 1024 * 1024;
+
+function isObj(v: unknown): v is Record<string, unknown> { return v !== null && typeof v === 'object' && !Array.isArray(v); }
+
+// Check every number in `v` that also exists in `base` is a finite number (recursive). Returns the first bad path.
+function badNumbers(base: unknown, v: unknown, path = ''): string | null {
+  if (typeof base === 'number') return typeof v === 'number' && Number.isFinite(v) ? null : path || '(value)';
+  if (isObj(base) && isObj(v)) {
+    for (const k of Object.keys(base)) if (k in v) { const r = badNumbers(base[k], v[k], path ? `${path}.${k}` : k); if (r) return r; }
+  }
+  return null;
+}
+
+function checkImage(u: unknown): string {
+  if (typeof u !== 'string' || !/^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(u)) throw new Error('The embedded track image is not a PNG, JPEG or WebP data URL.');
+  return u;
+}
+
+export type Imported =
+  | { kind: 'project'; value: ProjectFile }
+  | { kind: 'robot'; value: RobotProfile; code: Partial<CodeSetup> | null }
+  | { kind: 'track'; value: TrackFile };
+
+// Imported files are untrusted: check the type, version, sizes and every number before using them.
+export function parseImport(text: string): Imported {
+  if (text.length > MAX_IMPORT_BYTES) throw new Error('That file is too large (over 40 MB).');
+  let j: unknown;
+  try { j = JSON.parse(text); } catch { throw new Error('That file is not valid JSON.'); }
+  if (!isObj(j)) throw new Error('That file is not an LFSim file.');
+  if (j.lfsim === 'project') {
+    if (j.version !== 1) throw new Error(`Project file version ${String(j.version)} is not supported (expected 1).`);
+    if (!isObj(j.settings)) throw new Error('The project file has no settings.');
+    const settings = merge(DEFAULTS, j.settings);
+    const bad = badNumbers(DEFAULTS, settings);
+    if (bad) throw new Error(`The project file has an invalid number at ${bad}.`);
+    const runs = Array.isArray(j.runs) ? (j.runs as RunSummary[]).filter((r) => isObj(r) && typeof r.label === 'string').slice(0, 200) : [];
+    return { kind: 'project', value: { lfsim: 'project', version: 1, settings, trackImage: j.trackImage ? checkImage(j.trackImage) : null, runs, memory: isObj(j.memory) ? j.memory : null } };
+  }
+  if (j.lfsim === 'track') {
+    if (j.version !== 1) throw new Error(`Track file version ${String(j.version)} is not supported (expected 1).`);
+    const setup = merge(DEFAULT_TRACK_SETUP, j.setup);
+    const bad = badNumbers(DEFAULT_TRACK_SETUP, setup);
+    if (bad) throw new Error(`The track file has an invalid number at ${bad}.`);
+    return { kind: 'track', value: { lfsim: 'track', version: 1, setup, image: checkImage(j.image) } };
+  }
+  if (j.version === 1 && typeof j.wheelbase_mm === 'number') {
+    const { firmware, ...rest } = j as Record<string, unknown> & { firmware?: unknown };
+    const value = merge(DEFAULT_PROFILE, rest);
+    const bad = badNumbers(DEFAULT_PROFILE, value);
+    if (bad) throw new Error(`The robot file has an invalid number at ${bad}.`);
+    if (value.sensor.channels < 2 || value.sensor.channels > 32) throw new Error('The robot file must have 2 to 32 sensor channels.');
+    let code: Partial<CodeSetup> | null = null;
+    if (isObj(firmware)) {
+      code = {};
+      for (const k of ['source', 'sourceLang', 'translated', 'notes'] as const) if (typeof firmware[k] === 'string') code[k] = firmware[k] as string;
+      if (isObj(firmware.wiring)) code.wiring = merge(SAMPLE_WIRING, firmware.wiring);
+    }
+    return { kind: 'robot', value, code };
+  }
+  throw new Error('This file is not an LFSim project (.lfsim.json), robot (.robot.json) or track (.track.json).');
 }

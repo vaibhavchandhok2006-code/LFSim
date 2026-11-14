@@ -1,17 +1,24 @@
-import { useEffect, useRef } from 'react';
-import { Simulation } from '../sim/simulation';
+import { useEffect, useRef, useState } from 'react';
+import uPlot from 'uplot';
+import 'uplot/dist/uPlot.min.css';
 import { RobotProfile } from '../sim/profile';
+import { F } from '../worker/protocol';
+import { RunData } from './run';
 
-interface Props { sim: Simulation | null; profile: RobotProfile; frame: number }
+interface Props { run: RunData | null; t: number; profile: RobotProfile; frame: number }
 
-export function LivePanel({ sim, profile, frame }: Props) {
+const SENSOR_COLORS = ['#2457C5', '#1F6B47', '#B9470F', '#7C3AED', '#0E7490', '#BE185D', '#4D7C0F', '#92400E', '#1D4ED8', '#047857', '#C2410C', '#6D28D9', '#0369A1', '#9D174D', '#65A30D', '#78350F'];
+
+export function LivePanel({ run, t, profile, frame }: Props) {
   const s = profile.sensor;
-  const raw = sim ? sim.sensors.raw : new Array(s.channels).fill(s.whiteRaw);
+  const fi = run ? run.indexAt(t) : -1;
+  const has = run !== null && fi >= 0;
+  const raw = has ? run!.sensors(fi, s.channels) : new Array(s.channels).fill(s.whiteRaw);
   const max = 2 ** s.adcBits - 1;
   const highIsBlack = s.blackRaw >= s.whiteRaw;
-  const b = sim?.body;
-  const tel = sim?.brain.telemetry() ?? {};
-  const wheelV = (w: number | undefined) => (w === undefined || !sim ? '—' : (w * sim.physics.wheelR).toFixed(2));
+  const g = (k: number) => (has ? run!.get(fi, k) : NaN);
+  const num = (v: number, d = 2, unit = '') => (Number.isFinite(v) ? `${v.toFixed(d)}${unit}` : '—');
+  const [windowS, setWindowS] = useState(5);
 
   return (
     <aside className="live" aria-label="Live robot data">
@@ -35,53 +42,87 @@ export function LivePanel({ sim, profile, frame }: Props) {
       <section>
         <h3>Robot</h3>
         <dl className="readout">
-          <dt>State</dt><dd>{sim ? sim.brain.state() : 'Ready'}</dd>
-          <dt>Speed</dt><dd>{b ? `${sim!.physics.forwardSpeed(b).toFixed(2)} m/s` : '—'}</dd>
-          <dt>Wheels L / R</dt><dd>{wheelV(b?.wL)} / {wheelV(b?.wR)} m/s</dd>
-          <dt>PWM L / R</dt><dd>{sim ? `${sim.dutyL.toFixed(2)} / ${sim.dutyR.toFixed(2)}` : '—'}</dd>
-          <dt>Line error</dt><dd>{tel.error_mm !== undefined ? `${tel.error_mm.toFixed(1)} mm` : '—'}</dd>
-          <dt>Battery</dt><dd>{b ? `${b.vBatt.toFixed(2)} V` : `${profile.battery.fullV.toFixed(2)} V`}</dd>
-          <dt>Current L / R</dt><dd>{b ? `${b.iL.toFixed(2)} / ${b.iR.toFixed(2)} A` : '—'}</dd>
-          <dt>Wheel slip</dt><dd>{b?.slipping ? 'Skidding' : 'Gripping'}</dd>
+          <dt>State</dt><dd>{has ? run!.states[g(F.state)] ?? '' : 'Ready'}</dd>
+          <dt>Speed</dt><dd>{num(g(F.v), 2, ' m/s')}</dd>
+          <dt>Wheels L / R</dt><dd>{num(g(F.vL))} / {num(g(F.vR))} m/s</dd>
+          <dt>PWM L / R</dt><dd>{num(g(F.dutyL))} / {num(g(F.dutyR))}</dd>
+          <dt>Line error</dt><dd>{num(g(F.err), 1, ' mm')}</dd>
+          <dt>Battery</dt><dd>{has ? num(g(F.vBatt), 2, ' V') : `${profile.battery.fullV.toFixed(2)} V`}</dd>
+          <dt>Current L / R</dt><dd>{num(g(F.iL))} / {num(g(F.iR))} A</dd>
+          <dt>Wheel slip</dt><dd>{has ? (g(F.slip) ? 'Skidding' : 'Gripping') : '—'}</dd>
         </dl>
       </section>
 
       <section>
-        <h3>Last 5 seconds</h3>
-        <Graph sim={sim} frame={frame} />
-        <p className="legend"><span className="sw sw-err" />Line error (±40 mm) <span className="sw sw-l" />Left PWM <span className="sw sw-r" />Right PWM</p>
+        <div className="graph-head">
+          <h3>Graphs</h3>
+          <div className="speed small" role="group" aria-label="Graph window">
+            {[5, 20, 0].map((w) => <button key={w} className={windowS === w ? 'on' : ''} onClick={() => setWindowS(w)}>{w ? `${w} s` : 'All'}</button>)}
+          </div>
+        </div>
+        <Charts run={run} t={t} frame={frame} windowS={windowS} channels={s.channels} />
       </section>
     </aside>
   );
 }
 
-function Graph({ sim, frame }: { sim: Simulation | null; frame: number }) {
-  const ref = useRef<HTMLCanvasElement>(null);
+interface ChartDef { title: string; series: { label: string; color: string; get: (r: RunData, i: number) => number; scale?: string }[]; scales?: Record<string, { range?: [number, number] }> }
+
+function Charts({ run, t, frame, windowS, channels }: { run: RunData | null; t: number; frame: number; windowS: number; channels: number }) {
+  const defs: ChartDef[] = [
+    { title: 'Line error (mm) and PID output', series: [
+      { label: 'Error mm', color: '#16212C', get: (r, i) => r.get(i, F.err) },
+      { label: 'PID', color: '#B9470F', get: (r, i) => r.get(i, F.pid), scale: 'pid' },
+    ] },
+    { title: 'Wheel speed (m/s) and PWM', series: [
+      { label: 'Left m/s', color: '#2457C5', get: (r, i) => r.get(i, F.vL) },
+      { label: 'Right m/s', color: '#C2410C', get: (r, i) => r.get(i, F.vR) },
+      { label: 'PWM L', color: '#93B4F0', get: (r, i) => r.get(i, F.dutyL), scale: 'pwm' },
+      { label: 'PWM R', color: '#F0B48F', get: (r, i) => r.get(i, F.dutyR), scale: 'pwm' },
+    ] },
+    { title: 'Battery (V)', series: [{ label: 'Battery V', color: '#1F6B47', get: (r, i) => r.get(i, F.vBatt) }] },
+    { title: 'Raw sensors', series: Array.from({ length: channels }, (_, k) => ({ label: `S${k + 1}`, color: SENSOR_COLORS[k % SENSOR_COLORS.length], get: (r: RunData, i: number) => r.get(i, r.stride - channels + k) })) },
+  ];
+  return <>{defs.map((d) => <Chart key={d.title + channels} def={d} run={run} t={t} frame={frame} windowS={windowS} />)}</>;
+}
+
+function Chart({ def, run, t, frame, windowS }: { def: ChartDef; run: RunData | null; t: number; frame: number; windowS: number }) {
+  const box = useRef<HTMLDivElement>(null);
+  const plot = useRef<uPlot | null>(null);
   useEffect(() => {
-    const c = ref.current; if (!c) return;
-    const dpr = window.devicePixelRatio || 1;
-    const r = c.getBoundingClientRect();
-    c.width = r.width * dpr; c.height = r.height * dpr;
-    const ctx = c.getContext('2d')!;
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.clearRect(0, 0, r.width, r.height);
-    ctx.strokeStyle = '#D5DCE3'; ctx.lineWidth = 1;
-    ctx.beginPath(); ctx.moveTo(0, r.height / 2); ctx.lineTo(r.width, r.height / 2); ctx.stroke();
-    if (!sim || sim.history.length < 2) return;
-    const t1 = sim.time, t0 = t1 - 5;
-    const pts = sim.history.filter((h) => h.t >= t0);
-    const line = (key: string, scale: number, color: string) => {
-      ctx.strokeStyle = color; ctx.lineWidth = 1.5; ctx.beginPath();
-      pts.forEach((h, i) => {
-        const x = ((h.t - t0) / 5) * r.width;
-        const y = r.height / 2 - ((h[key] ?? 0) / scale) * (r.height / 2 - 4);
-        if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
-      });
-      ctx.stroke();
-    };
-    line('dutyL', 1, '#2457C5');
-    line('dutyR', 1, '#C2410C');
-    line('error_mm', 40, '#16212C');
-  }, [sim, frame]);
-  return <canvas ref={ref} className="graph" aria-label="Line error and motor PWM over the last 5 seconds" />;
+    const el = box.current!;
+    const scales: uPlot.Scales = { x: { time: false } };
+    for (const s of def.series) if (s.scale) scales[s.scale] = {};
+    const axes: uPlot.Axis[] = [{ size: 22, font: '10px Atkinson Hyperlegible Next', stroke: '#5B6876', grid: { stroke: '#E4E9EE' } }, { size: 40, font: '10px Atkinson Hyperlegible Next', stroke: '#5B6876', grid: { stroke: '#E4E9EE' } }];
+    const extra = def.series.find((s) => s.scale);
+    if (extra) axes.push({ scale: extra.scale, side: 1, size: 34, font: '10px Atkinson Hyperlegible Next', stroke: '#8794A1', grid: { show: false } });
+    plot.current = new uPlot({
+      width: el.clientWidth || 260, height: 110, legend: { show: true, live: false }, cursor: { show: false }, scales, axes,
+      series: [{ label: 's' }, ...def.series.map((s) => ({ label: s.label, stroke: s.color, width: 1.4, scale: s.scale, points: { show: false } }))],
+    }, [[], ...def.series.map(() => [])], el);
+    return () => { plot.current?.destroy(); plot.current = null; };
+  }, [def.series.length]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    const p = plot.current; if (!p) return;
+    if (!run || run.count === 0) { p.setData([[], ...def.series.map(() => [])]); return; }
+    const end = run.indexAt(t);
+    const startT = windowS ? t - windowS : 0;
+    let start = windowS ? run.indexAt(startT) : 0;
+    if (start < 0) start = 0;
+    const step = Math.max(1, Math.floor((end - start) / 400));
+    const xs: number[] = []; const ys = def.series.map(() => [] as (number | null)[]);
+    for (let i = start; i <= end; i += step) {
+      xs.push(run.get(i, F.t));
+      def.series.forEach((s, k) => { const v = s.get(run, i); ys[k].push(Number.isFinite(v) ? v : null); });
+    }
+    p.setData([xs, ...ys] as uPlot.AlignedData);
+  }, [run, t, frame, windowS, def]);
+
+  return (
+    <figure className="chart">
+      <figcaption>{def.title}</figcaption>
+      <div ref={box} />
+    </figure>
+  );
 }

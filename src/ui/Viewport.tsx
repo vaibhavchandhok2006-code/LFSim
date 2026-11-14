@@ -1,16 +1,23 @@
 import { useEffect, useRef, useState } from 'react';
-import { Simulation } from '../sim/simulation';
+import { RunData } from './run';
+import { F } from '../worker/protocol';
 import { RobotProfile } from '../sim/profile';
 import { Pose, Track } from '../track/track';
 import { COLORS, drawRobot, hitRobot } from './drawRobot';
 
-export interface ViewOptions { follow: boolean; grid: boolean; trail: boolean; spots: boolean }
+export interface ViewOptions { follow: boolean; grid: boolean; trail: boolean; spots: boolean; ideal: boolean; decisions: boolean }
+
+export interface Overlay { points: [number, number][]; color: string; label: string; dashed?: boolean }
 
 interface Props {
   track: Track | null;
   bitmap: HTMLCanvasElement | null;
-  sim: Simulation | null;
+  run: RunData | null;
+  t: number;                     // playback time
   profile: RobotProfile;
+  overlays: Overlay[];           // ideal path, compared runs
+  folds: { horizontal: boolean; pos: number; width: number }[];
+  canvasRef?: (c: HTMLCanvasElement | null) => void;
   pose: Pose;                    // start pose (shown when no sim has run)
   editable: boolean;             // robot can be dragged
   onPoseChange: (p: Pose) => void;
@@ -81,17 +88,19 @@ export function Viewport(props: Props) {
     if (c.width !== Math.round(r.width * dpr) || c.height !== Math.round(r.height * dpr)) {
       c.width = Math.round(r.width * dpr); c.height = Math.round(r.height * dpr);
     }
-    const key = `${props.mode}:${props.track?.imageName}:${props.track?.w}:${props.track?.preset.id}`;
+    const key = `${props.mode}:${props.track?.imageName}:${props.track?.w}:${props.track?.preset.id}:${Math.round(r.width / 40)}:${Math.round(r.height / 40)}`;
     if (fitted.current !== key) { fitted.current = key; fit(); }
     const ctx = c.getContext('2d')!;
-    const { track, bitmap, sim, profile, view } = props;
+    const { track, bitmap, run, profile, view, t } = props;
     const k = cam.current;
-    const pose = sim ? { x: sim.body.x, y: sim.body.y, theta: sim.body.theta } : props.pose;
-    if (view.follow && sim && sim.status === 'running' && props.mode === 'track') {
+    const fi = run ? run.indexAt(t) : -1;
+    const has = run !== null && fi >= 0;
+    const pose = has ? { x: run!.get(fi, F.x), y: run!.get(fi, F.y), theta: run!.get(fi, F.theta) } : props.pose;
+    if (view.follow && has && props.mode === 'track') {
       k.cx += (pose.x - k.cx) * 0.15; k.cy += (pose.y - k.cy) * 0.15;
     }
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.fillStyle = COLORS.bench;
+    ctx.fillStyle = getComputedStyle(c).getPropertyValue('--bench').trim() || COLORS.bench;
     ctx.fillRect(0, 0, r.width, r.height);
     ctx.setTransform(dpr * k.scale, 0, 0, dpr * k.scale, dpr * (r.width / 2 - k.cx * k.scale), dpr * (r.height / 2 - k.cy * k.scale));
     const px = k.scale;
@@ -130,28 +139,61 @@ export function Viewport(props: Props) {
       if (track.finish) box(track.finish, COLORS.finish, 'Finish');
     }
 
-    if (sim && view.trail && sim.trail.length > 1) {
-      const vmax = sim.physics.nominalTopSpeed() * 0.8;
+    if (track) {
+      for (const f of props.folds) {
+        ctx.fillStyle = 'rgba(185, 71, 15, 0.08)';
+        const W = track.w * track.res, H = track.h * track.res;
+        if (f.horizontal) ctx.fillRect(0, f.pos - f.width / 2, W, f.width); else ctx.fillRect(f.pos - f.width / 2, 0, f.width, H);
+      }
+    }
+    for (const o of props.overlays) {
+      if (o.points.length < 2) continue;
+      ctx.strokeStyle = o.color; ctx.lineWidth = 3 / px; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+      ctx.setLineDash(o.dashed ? [8 / px, 6 / px] : []);
+      ctx.beginPath(); ctx.moveTo(o.points[0][0], o.points[0][1]);
+      for (const q of o.points.slice(1)) ctx.lineTo(q[0], q[1]);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+
+    if (has && view.trail && fi > 0) {
+      const r0 = run!;
+      const vmax = 1.2;
       ctx.lineCap = 'round';
       ctx.lineWidth = 4 / px;
-      for (let i = 1; i < sim.trail.length; i += 1) {
-        const a = sim.trail[i - 1], b = sim.trail[i];
-        ctx.strokeStyle = b.off ? COLORS.off : speedColor(b.v, vmax);
-        ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+      const step = Math.max(1, Math.floor(r0.frameHz / 50));
+      let prev = 0;
+      for (let i = step; i <= fi; i += step) {
+        ctx.strokeStyle = r0.get(i, F.off) ? COLORS.off : speedColor(r0.get(i, F.v), vmax);
+        ctx.beginPath(); ctx.moveTo(r0.get(prev, F.x), r0.get(prev, F.y)); ctx.lineTo(r0.get(i, F.x), r0.get(i, F.y)); ctx.stroke();
+        prev = i;
       }
-      for (const e of sim.events) {
+      for (const e of r0.events) {
+        if (e.t > t) break;
         if (e.kind === 'offline' || e.kind === 'aborted') {
           ctx.strokeStyle = COLORS.off; ctx.lineWidth = 2.5 / px;
           const d = 7 / px;
           ctx.beginPath(); ctx.moveTo(e.x - d, e.y - d); ctx.lineTo(e.x + d, e.y + d); ctx.moveTo(e.x + d, e.y - d); ctx.lineTo(e.x - d, e.y + d); ctx.stroke();
         }
       }
+      if (view.decisions) {
+        const col: Record<string, string> = { L: '#1F6B47', S: '#2457C5', R: '#C2410C', B: '#7C3AED', finish: '#16212C' };
+        for (const d of r0.decisions) {
+          if (d.t > t) break;
+          ctx.fillStyle = '#fff';
+          ctx.beginPath(); ctx.arc(d.x, d.y, 9 / px, 0, Math.PI * 2); ctx.fill();
+          ctx.fillStyle = col[d.kind] ?? '#16212C';
+          ctx.beginPath(); ctx.arc(d.x, d.y, 7.5 / px, 0, Math.PI * 2); ctx.fill();
+          screenText(ctx, d.kind === 'finish' ? 'F' : d.kind, d.x, d.y + 3.5 / px, '#fff', 10, 700, 'center');
+        }
+      }
     }
 
-    const leds = sim ? sim.sensors.raw.map((v) => (profile.sensor.blackRaw >= profile.sensor.whiteRaw ? v > profile.sensor.threshold : v < profile.sensor.threshold)) : null;
+    const n = profile.sensor.channels;
+    const leds = has ? run!.sensors(fi, n).map((v) => (profile.sensor.blackRaw >= profile.sensor.whiteRaw ? v > profile.sensor.threshold : v < profile.sensor.threshold)) : null;
     drawRobot(ctx, profile, {
-      ...pose, angL: sim?.body.angL ?? 0, angR: sim?.body.angR ?? 0, leds,
-      showSpots: view.spots, ghost: !sim && props.editable,
+      ...pose, angL: has ? run!.get(fi, F.angL) : 0, angR: has ? run!.get(fi, F.angR) : 0, leds,
+      showSpots: view.spots, ghost: !has && props.editable,
     }, px);
   });
 
@@ -200,7 +242,7 @@ export function Viewport(props: Props) {
   return (
     <div className="viewport">
       <canvas
-        ref={ref}
+        ref={(c) => { (ref as { current: HTMLCanvasElement | null }).current = c; props.canvasRef?.(c); }}
         onPointerDown={onDown}
         onPointerMove={onMove}
         onPointerUp={onUp}

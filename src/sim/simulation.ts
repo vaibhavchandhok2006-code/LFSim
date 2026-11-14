@@ -5,7 +5,7 @@ import { Brain, BrainIO, DecisionRecord } from '../brain/brain';
 import { Track, inRect, distanceToLine } from '../track/track';
 import { BodyState, initialBody, Physics, PhysicsFlags } from './physics';
 import { RobotProfile } from './profile';
-import { SensorArray, SensorFlags } from './sensors';
+import { Disturb, Rng, SensorArray, SensorFlags } from './sensors';
 
 export interface SimFlags extends PhysicsFlags, SensorFlags {}
 export const DEFAULT_FLAGS: SimFlags = { motorMismatch: true, batterySag: true, grip: true, noise: true, mismatch: true };
@@ -43,6 +43,8 @@ export class Simulation {
   history: Record<string, number>[] = []; // sampled every 10 ms for graphs
   decisions: DecisionEvent[] = [];
   readonly memory: Record<string, unknown>; // EEPROM/NVS contents, kept for a memory run
+  disturb: Disturb | undefined;
+  onConsole: ((t: number, text: string) => void) | null = null;
   private nextBrain = 0;
   private nextSample = 0;
   private io: BrainIO;
@@ -85,7 +87,7 @@ export class Simulation {
       },
       memory: this.memory,
       decision: (rec) => { sim.decisions.push({ ...rec, t: sim.time, x: sim.body.x, y: sim.body.y }); },
-      readSensors: () => sim.sensors.read(sim.track, sim.body.x, sim.body.y, sim.body.theta).slice(),
+      readSensors: () => sim.sensors.read(sim.track, sim.body.x, sim.body.y, sim.body.theta, sim.disturb).slice(),
       nowMs: () => sim.time * 1000,
       setMotors: (l, r) => { sim.dutyL = l; sim.dutyR = r; },
       encoders: () => {
@@ -95,7 +97,7 @@ export class Simulation {
         return { left: Math.floor(sim.body.angL * k), right: Math.floor(sim.body.angR * k), cpr: e.cpr };
       },
       odometry_m: () => (sim.body.angL + sim.body.angR) / 2 * sim.physics.wheelR,
-      log: (msg) => sim.event('log', msg),
+      log: (msg) => { sim.event('log', msg); sim.onConsole?.(sim.time, msg); },
     };
   }
 
@@ -196,4 +198,44 @@ export class Simulation {
       if (this.status === 'finished' || this.status === 'stopped') break;
     }
   }
+}
+
+// Disturbance field: smooth uneven lighting and mat folds (bands across the mat that lift the sensors).
+export function makeDisturbance(track: Track, d: { lighting: { on: boolean; strength: number }; bumps: { on: boolean; strength: number }; seed: number }, profile: RobotProfile): Disturb | undefined {
+  if (!d.lighting.on && !d.bumps.on) return undefined;
+  const rng = new Rng(d.seed || 1);
+  const W = track.w * track.res, H = track.h * track.res;
+  const waves = Array.from({ length: 4 }, () => ({ kx: (0.5 + rng.next() * 2.5) * (2 * Math.PI) / W, ky: (0.5 + rng.next() * 2.5) * (2 * Math.PI) / H, ph: rng.next() * 6.28, a: 0.5 + rng.next() * 0.5 }));
+  const norm = waves.reduce((s, w) => s + w.a, 0);
+  const range = Math.abs(profile.sensor.blackRaw - profile.sensor.whiteRaw);
+  // up to 25% of the white-black range of brightness change at full strength
+  const ampl = d.lighting.on ? d.lighting.strength * 0.25 * range : 0;
+  const folds = d.bumps.on ? Array.from({ length: 5 }, () => {
+    const horizontal = rng.next() < 0.5;
+    return { horizontal, pos: (0.15 + rng.next() * 0.7) * (horizontal ? H : W), width: 0.06 + rng.next() * 0.06 };
+  }) : [];
+  const lift = d.bumps.strength * 6; // mm at the crest
+  const sign = profile.sensor.blackRaw >= profile.sensor.whiteRaw ? -1 : 1; // brighter light reads more "white"
+  return (px, py) => {
+    let amb = 0;
+    if (ampl) { let s = 0; for (const w of waves) s += w.a * Math.sin(w.kx * px + w.ky * py + w.ph); amb = sign * ampl * (s / norm); }
+    let dh = 0;
+    for (const f of folds) {
+      const dist = Math.abs((f.horizontal ? py : px) - f.pos);
+      if (dist < f.width / 2) dh = Math.max(dh, lift * Math.cos((Math.PI * dist) / f.width));
+    }
+    return { dh_mm: dh, amb };
+  };
+}
+
+export function foldBands(track: Track, d: { bumps: { on: boolean; strength: number }; seed: number }) {
+  // same draws as makeDisturbance, for drawing the folds on the track
+  if (!d.bumps.on) return [];
+  const rng = new Rng(d.seed || 1);
+  const W = track.w * track.res, H = track.h * track.res;
+  for (let i = 0; i < 4; i += 1) { rng.next(); rng.next(); rng.next(); rng.next(); }
+  return Array.from({ length: 5 }, () => {
+    const horizontal = rng.next() < 0.5;
+    return { horizontal, pos: (0.15 + rng.next() * 0.7) * (horizontal ? H : W), width: 0.06 + rng.next() * 0.06 };
+  });
 }

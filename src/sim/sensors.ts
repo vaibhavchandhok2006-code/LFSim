@@ -19,6 +19,8 @@ export class Rng {
 }
 
 export interface SensorFlags { noise: boolean; mismatch: boolean }
+export type Disturb = (px: number, py: number) => { dh_mm: number; amb: number };
+const NO_DISTURB = { dh_mm: 0, amb: 0 };
 
 export class SensorArray {
   readonly n: number;
@@ -64,17 +66,22 @@ export class SensorArray {
     return [x + this.offset * c + lat * s, y + this.offset * s - lat * c];
   }
 
-  // heightDelta_mm: extra height from a mat bump under the array (disturbance), 0 normally.
-  read(t: Track, x: number, y: number, theta: number, heightDelta_mm = 0, ambientShift = 0): number[] {
+  // disturb(px, py): disturbance at a floor point — extra sensor height from a mat bump (mm) and an ambient-light
+  // shift in raw ADC counts. Undefined = clean conditions.
+  read(t: Track, x: number, y: number, theta: number, disturb?: Disturb): number[] {
     const s = this.p.sensor;
-    const k = contrastFactor(s.height_mm + heightDelta_mm);
     const mid = (s.whiteRaw + s.blackRaw) / 2;
-    const half = ((s.blackRaw - s.whiteRaw) / 2) * k;
     const sigma = ((Math.abs(s.blackRaw - s.whiteRaw) * s.noise_pct) / 100);
     for (let i = 0; i < this.n; i += 1) {
       const [px, py] = this.position(i, x, y, theta);
+      const d = disturb ? disturb(px, py) : NO_DISTURB;
+      const k = contrastFactor(s.height_mm + d.dh_mm);
+      const half = ((s.blackRaw - s.whiteRaw) / 2) * k;
+      const ambientShift = d.amb;
+      // a raised sensor also sees a wider spot
+      const grow = d.dh_mm > 0 ? (spotDiameter_mm({ ...s, spot_mm: 0, height_mm: s.height_mm + d.dh_mm }) / spotDiameter_mm({ ...s, spot_mm: 0 })) : 1;
       let cov = 0;
-      for (const [dx, dy, w] of this.spot) cov += w * darkAt(t, px + dx, py + dy);
+      for (const [dx, dy, w] of this.spot) cov += w * darkAt(t, px + dx * grow, py + dy * grow);
       this.coverage[i] = cov;
       const g = this.flags.mismatch ? this.gains[i] : 1;
       let v = mid + half * g * (2 * cov - 1) + ambientShift;
