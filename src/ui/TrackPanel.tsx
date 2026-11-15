@@ -7,6 +7,7 @@ interface Props {
   track: Track | null;
   messages: string[];
   loading: boolean;
+  imageSize: { w: number; h: number } | null;
   offLine_cm: number;
   onChange: (s: TrackSetup) => void;
   onOffLine: (v: number) => void;
@@ -14,10 +15,20 @@ interface Props {
   onUseSample: () => void;
 }
 
-export function TrackPanel({ setup, track, messages, loading, offLine_cm, onChange, onOffLine, onPickImage, onUseSample }: Props) {
+export function TrackPanel({ setup, track, messages, loading, imageSize, offLine_cm, onChange, onOffLine, onPickImage, onUseSample }: Props) {
   const set = <K extends keyof TrackSetup>(k: K, v: TrackSetup[K]) => onChange({ ...setup, [k]: v });
   const setC = <K extends keyof TrackSetup['custom']>(k: K, v: number) => onChange({ ...setup, custom: { ...setup.custom, [k]: v } });
   const pose = track?.startPose;
+  const crop = setup.crop ?? { left_pct: 0, top_pct: 0, right_pct: 0, bottom_pct: 0 };
+  const setCrop = (k: keyof typeof crop, v: number) => onChange({ ...setup, crop: { ...crop, [k]: Math.max(0, Math.min(45, v)) } });
+  // Trim the longer side equally so the kept part has the track's shape.
+  const fitCrop = () => {
+    if (!imageSize || !track) return;
+    const want = track.preset.width_m / track.preset.height_m, have = imageSize.w / imageSize.h;
+    const c = { left_pct: 0, top_pct: 0, right_pct: 0, bottom_pct: 0 };
+    if (have > want) { const t = (1 - want / have) * 50; c.left_pct = t; c.right_pct = t; } else { const t = (1 - have / want) * 50; c.top_pct = t; c.bottom_pct = t; }
+    onChange({ ...setup, crop: { left_pct: +c.left_pct.toFixed(2), top_pct: +c.top_pct.toFixed(2), right_pct: +c.right_pct.toFixed(2), bottom_pct: +c.bottom_pct.toFixed(2) } });
+  };
   return (
     <div className="panel-scroll">
       <div className="panel-head">
@@ -48,6 +59,17 @@ export function TrackPanel({ setup, track, messages, loading, offLine_cm, onChan
         </>}
         <Toggle label="Set line width to the preset width" checked={setup.normaliseWidth} onChange={(v) => set('normaliseWidth', v)}
           hint="Keeps the track's shape, changes only line thickness." />
+      </Group>
+
+      <Group title="Crop" note={imageSize ? `Image ${imageSize.w} × ${imageSize.h} px. Trim the edges so only the mat is left; the kept part is fitted to the track size.` : 'Trim the edges so only the mat is left.'}>
+        <NumField label="Left" unit="%" value={crop.left_pct} min={0} max={45} step={0.5} onChange={(v) => setCrop('left_pct', v)} />
+        <NumField label="Right" unit="%" value={crop.right_pct} min={0} max={45} step={0.5} onChange={(v) => setCrop('right_pct', v)} />
+        <NumField label="Top" unit="%" value={crop.top_pct} min={0} max={45} step={0.5} onChange={(v) => setCrop('top_pct', v)} />
+        <NumField label="Bottom" unit="%" value={crop.bottom_pct} min={0} max={45} step={0.5} onChange={(v) => setCrop('bottom_pct', v)} />
+        <div className="row-buttons">
+          <button disabled={!imageSize} onClick={fitCrop}>Crop centre to the track's shape</button>
+          <button onClick={() => onChange({ ...setup, crop: { left_pct: 0, top_pct: 0, right_pct: 0, bottom_pct: 0 } })}>No crop</button>
+        </div>
       </Group>
 
       <Group title="Start and finish">

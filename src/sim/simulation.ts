@@ -40,6 +40,10 @@ export class Simulation {
   offLineCount = 0;
   isOffLine = false;
   dutyL = 0; dutyR = 0;
+  // Without encoders a brain can only estimate how far each wheel turned from what it commanded: duty × the motor's
+  // no-load wheel speed at the battery's nominal voltage, through a first-order lag (estimate, 60 ms). It ignores
+  // load, slip and battery sag, so it drifts like dead reckoning on a real robot.
+  private estAngL = 0; private estAngR = 0; private estWL = 0; private estWR = 0;
   brakeL = false; brakeR = false; // short brake at zero duty (set by the firmware driver model)
   trail: TrailPoint[] = [];
   events: SimEvent[] = [];
@@ -86,15 +90,7 @@ export class Simulation {
       blackRaw: s.blackRaw,
       threshold: s.threshold,
       geometry: { wheelbase_mm: this.profile.wheelbase_mm, wheelDiameter_mm: this.profile.wheelDiameter_mm, sensorOffset_mm: this.profile.sensorOffset_mm },
-      wheelOdometry: () => {
-        const r = sim.physics.wheelR;
-        const e = sim.profile.encoders;
-        if (e.present && e.usedInCode) {
-          const k = e.cpr / (2 * Math.PI);
-          return { left_m: (Math.floor(sim.body.angL * k) / k) * r, right_m: (Math.floor(sim.body.angR * k) / k) * r };
-        }
-        return { left_m: sim.body.angL * r, right_m: sim.body.angR * r };
-      },
+      wheelOdometry: () => sim.wheelOdometry(),
       memory: this.memory,
       decision: (rec) => { sim.decisions.push({ ...rec, t: sim.time, x: sim.body.x, y: sim.body.y }); },
       readSensors: () => sim.sensors.read(sim.track, sim.body.x, sim.body.y, sim.body.theta, sim.disturb).slice(),
@@ -108,9 +104,19 @@ export class Simulation {
         const k = e.cpr / (2 * Math.PI);
         return { left: Math.floor(sim.body.angL * k), right: Math.floor(sim.body.angR * k), cpr: e.cpr };
       },
-      odometry_m: () => (sim.body.angL + sim.body.angR) / 2 * sim.physics.wheelR,
+      odometry_m: () => { const w = sim.wheelOdometry(); return (w.left_m + w.right_m) / 2; },
       log: (msg) => { sim.event('log', msg); sim.onConsole?.(sim.time, msg); },
     };
+  }
+
+  // What the Settings brain knows of wheel travel: encoder counts if the robot has encoders, else the estimate above.
+  wheelOdometry(): { left_m: number; right_m: number } {
+    const r = this.physics.wheelR, e = this.profile.encoders;
+    if (e.present) {
+      const k = e.cpr / (2 * Math.PI);
+      return { left_m: (Math.floor(this.body.angL * k) / k) * r, right_m: (Math.floor(this.body.angR * k) / k) * r };
+    }
+    return { left_m: this.estAngL * r, right_m: this.estAngR * r };
   }
 
   private event(kind: SimEvent['kind'], text: string) {
@@ -156,6 +162,12 @@ export class Simulation {
     const px = b.x, py = b.y;
     const h = TICK / SUB;
     for (let k = 0; k < SUB; k += 1) this.physics.step(b, this.dutyL, this.dutyR, h, this.brakeL, this.brakeR);
+    if (!this.profile.encoders.present) {
+      const wMax = (this.physics.nominalTopSpeed() / this.physics.wheelR) * (this.profile.battery.nominalV / this.profile.battery.fullV);
+      const a = TICK / 0.06;
+      this.estWL += (this.dutyL * wMax - this.estWL) * a; this.estWR += (this.dutyR * wMax - this.estWR) * a;
+      this.estAngL += this.estWL * TICK; this.estAngR += this.estWR * TICK;
+    }
     this.time += TICK;
     this.distance += Math.hypot(b.x - px, b.y - py);
 

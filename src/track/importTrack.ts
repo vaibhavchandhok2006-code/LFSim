@@ -100,6 +100,27 @@ function components(mask: Uint8Array, w: number, h: number): Component[] {
   return out;
 }
 
+// Otsu's threshold on 0..255 brightness. A clean image (almost every pixel near black or near white) keeps the
+// fixed midpoint 128, so clean tracks import exactly as before; a grey photo or scan gets a threshold that fits it.
+export function chooseThreshold(lum: Float32Array): { threshold: number; clean: boolean } {
+  const hist = new Float64Array(256);
+  let mid = 0;
+  for (let i = 0; i < lum.length; i += 1) { const v = Math.max(0, Math.min(255, Math.round(lum[i]))); hist[v] += 1; if (v > 40 && v < 215) mid += 1; }
+  if (mid / Math.max(1, lum.length) < 0.03) return { threshold: 128, clean: true };
+  const total = lum.length;
+  let sumAll = 0; for (let v = 0; v < 256; v += 1) sumAll += v * hist[v];
+  let wB = 0, sumB = 0, best = 128, bestVar = -1;
+  for (let t = 0; t < 256; t += 1) {
+    wB += hist[t]; if (wB === 0) continue;
+    const wF = total - wB; if (wF === 0) break;
+    sumB += t * hist[t];
+    const mB = sumB / wB, mF = (sumAll - sumB) / wF;
+    const between = wB * wF * (mB - mF) * (mB - mF);
+    if (between > bestVar) { bestVar = between; best = t + 0.5; }
+  }
+  return { threshold: Math.max(30, Math.min(225, best)), clean: false };
+}
+
 export interface ImportOptions {
   crop?: RectPx;          // area of the source image that is the track (default: whole image)
   normaliseWidth?: boolean;
@@ -117,9 +138,18 @@ export function processTrack(gray: Uint8ClampedArray | Uint8Array, sw: number, s
   const lum = resampleGray(gray, sw, sh, w, h, opt.crop);
   const messages: string[] = [];
 
-  // Binary line mask: dark = line. Threshold halfway between typical paper and tape.
+  // The image is fitted to the track size: warn if that stretches it (the track's shape would be distorted).
+  const cw = opt.crop ? opt.crop.x1 - opt.crop.x0 : sw, ch = opt.crop ? opt.crop.y1 - opt.crop.y0 : sh;
+  const stretch = (cw / ch) / (preset.width_m / preset.height_m);
+  if (Math.abs(stretch - 1) > 0.02) {
+    messages.push(`The ${opt.crop ? 'cropped ' : ''}image is ${Math.round(cw)} × ${Math.round(ch)} px but the track is ${preset.width_m} × ${preset.height_m} m, so it is stretched ${stretch > 1 ? 'taller' : 'wider'} by ${Math.round(Math.abs(stretch - 1) * 100)} %. Crop it to the mat with the crop box, or set the track size.`);
+  }
+
+  // Binary line mask: dark = line. Clean images use the midpoint; others get Otsu's threshold.
+  const thr = chooseThreshold(lum);
+  if (!thr.clean) messages.push(`Not a clean black-and-white image: lines are taken as darker than ${Math.round(thr.threshold)} of 255 (Otsu's method).`);
   let black = new Uint8Array(w * h);
-  for (let i = 0; i < w * h; i += 1) black[i] = lum[i] < 128 ? 1 : 0;
+  for (let i = 0; i < w * h; i += 1) black[i] = lum[i] < thr.threshold ? 1 : 0;
 
   // Line width: twice the distance-to-white along the ridge of the line.
   const white = new Uint8Array(w * h);

@@ -129,3 +129,36 @@ export function sensorLateral_mm(s: SensorArrayProfile): number[] {
 export function sizeCheck(p: RobotProfile, maxL_mm: number, maxW_mm: number) {
   return { ok: p.length_mm <= maxL_mm && p.width_mm <= maxW_mm, maxL_mm, maxW_mm };
 }
+
+// Allowed ranges for every profile number: [min, max, whole number?]. Imported robot files are untrusted and a zero or
+// negative value (stall current 0, mass 0, PWM bits 0, 2.5 channels…) would break the physics with NaN.
+export const PROFILE_RANGES: Record<string, [number, number, boolean?]> = {
+  wheelbase_mm: [20, 500], wheelDiameter_mm: [5, 200], wheelWidth_mm: [1, 100], length_mm: [20, 1000], width_mm: [20, 1000],
+  axleFromFront_mm: [0, 1000], sensorOffset_mm: [0, 500], casterOffset_mm: [-500, 500], comOffset_mm: [-300, 300],
+  'sensor.channels': [2, 32, true], 'sensor.spacing_mm': [1, 50], 'sensor.height_mm': [0.5, 50], 'sensor.spot_mm': [0, 50],
+  'sensor.adcBits': [6, 16, true], 'sensor.whiteRaw': [0, 65535], 'sensor.blackRaw': [0, 65535], 'sensor.noise_pct': [0, 50],
+  'sensor.mismatch_pct': [0, 50], 'sensor.threshold': [0, 65535],
+  'motor.ratedV': [1, 48], 'motor.noLoadRpm': [1, 100000], 'motor.stallTorque_kgcm': [0.001, 100], 'motor.stallCurrent_A': [0.01, 100],
+  'motor.gearRatio': [1, 10000], 'motor.mismatch_pct': [0, 50], 'motor.stictionFactor': [1, 10],
+  pwmFreq_Hz: [1, 200000], pwmBits: [1, 16, true],
+  'battery.fullV': [1, 60], 'battery.nominalV': [1, 60], 'battery.capacity_mAh': [1, 100000], 'battery.internalR_ohm': [0, 10],
+  mass_g: [10, 20000], inertia_kgm2: [0, 10], grip: [0.05, 3], 'encoders.cpr': [1, 100000, true],
+};
+
+// Every problem with a profile, in plain words (empty = fine).
+export function profileProblems(p: RobotProfile): string[] {
+  const out: string[] = [];
+  const get = (path: string) => path.split('.').reduce<unknown>((o, k) => (o as Record<string, unknown> | undefined)?.[k], p);
+  for (const [path, [lo, hi, whole]] of Object.entries(PROFILE_RANGES)) {
+    const v = get(path);
+    if (v === undefined && path === 'motor.stictionFactor') continue; // optional
+    if (typeof v !== 'number' || !Number.isFinite(v)) { out.push(`${path} must be a number.`); continue; }
+    if (v < lo || v > hi) out.push(`${path} is ${v}; it must be between ${lo} and ${hi}.`);
+    else if (whole && !Number.isInteger(v)) out.push(`${path} is ${v}; it must be a whole number.`);
+  }
+  const adcMax = 2 ** p.sensor.adcBits - 1;
+  for (const k of ['whiteRaw', 'blackRaw', 'threshold'] as const) if (p.sensor[k] > adcMax) out.push(`sensor.${k} is ${p.sensor[k]}, more than a ${p.sensor.adcBits}-bit ADC can read (${adcMax}).`);
+  if (p.battery.nominalV > p.battery.fullV) out.push('battery.nominalV must not be above battery.fullV.');
+  if (p.driver !== 'TB6612FNG' && p.driver !== 'L298N') out.push(`driver must be TB6612FNG or L298N (got ${String(p.driver)}).`);
+  return out;
+}

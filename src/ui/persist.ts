@@ -1,7 +1,7 @@
 // Autosave: small settings in localStorage, the track image in IndexedDB.
 // Project files bundle everything into one JSON for export/import.
 
-import { DEFAULT_PROFILE, RobotProfile } from '../sim/profile';
+import { DEFAULT_PROFILE, profileProblems, RobotProfile } from '../sim/profile';
 import { DEFAULT_SETTINGS, SettingsParams } from '../brain/settings';
 import { DEFAULT_FLAGS, SimFlags } from '../sim/simulation';
 import { Disturbances, Wiring } from '../worker/protocol';
@@ -23,6 +23,7 @@ export interface TrackSetup {
   normaliseWidth: boolean;
   swapStartFinish: boolean;
   poseOverride: { x: number; y: number; theta: number } | null;
+  crop: { left_pct: number; top_pct: number; right_pct: number; bottom_pct: number }; // trimmed off each edge
 }
 
 export interface AppSettings {
@@ -44,6 +45,7 @@ export const DEFAULT_TRACK_SETUP: TrackSetup = {
   normaliseWidth: true,
   swapStartFinish: false,
   poseOverride: null,
+  crop: { left_pct: 0, top_pct: 0, right_pct: 0, bottom_pct: 0 },
 };
 
 export const DEFAULTS: AppSettings = {
@@ -186,6 +188,8 @@ export function parseImport(text: string): Imported {
     const settings = merge(DEFAULTS, j.settings);
     const bad = badNumbers(DEFAULTS, settings);
     if (bad) throw new Error(`The project file has an invalid number at ${bad}.`);
+    const problems = profileProblems(settings.profile);
+    if (problems.length) throw new Error(`The project's robot has values out of range: ${problems.slice(0, 5).join(' ')}`);
     const runs = Array.isArray(j.runs) ? (j.runs as RunSummary[]).filter((r) => isObj(r) && typeof r.label === 'string').slice(0, 200) : [];
     return { kind: 'project', value: { lfsim: 'project', version: 1, settings, trackImage: j.trackImage ? checkImage(j.trackImage) : null, runs, memory: isObj(j.memory) ? j.memory : null } };
   }
@@ -201,7 +205,8 @@ export function parseImport(text: string): Imported {
     const value = merge(DEFAULT_PROFILE, rest);
     const bad = badNumbers(DEFAULT_PROFILE, value);
     if (bad) throw new Error(`The robot file has an invalid number at ${bad}.`);
-    if (value.sensor.channels < 2 || value.sensor.channels > 32) throw new Error('The robot file must have 2 to 32 sensor channels.');
+    const problems = profileProblems(value);
+    if (problems.length) throw new Error(`The robot file has values out of range: ${problems.slice(0, 5).join(' ')}${problems.length > 5 ? ` (and ${problems.length - 5} more)` : ''}`);
     let code: Partial<CodeSetup> | null = null;
     if (isObj(firmware)) {
       code = {};

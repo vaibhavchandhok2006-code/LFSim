@@ -1,4 +1,4 @@
-import { DriverModel, RobotProfile, spotDiameter_mm, yawInertia } from '../sim/profile';
+import { DriverModel, profileProblems, RobotProfile, spotDiameter_mm, yawInertia } from '../sim/profile';
 import { Physics } from '../sim/physics';
 import { TrackPreset } from '../track/track';
 import { Group, NumField, SelectField, Toggle } from './Field';
@@ -19,7 +19,8 @@ export function RobotPanel({ profile: p, preset, onChange, onExport, onImport }:
   const setE = <K extends keyof RobotProfile['encoders']>(k: K, v: RobotProfile['encoders'][K]) => onChange({ ...p, encoders: { ...p.encoders, [k]: v } });
 
   const fits = p.length_mm <= preset.maxRobotL_mm && p.width_mm <= preset.maxRobotW_mm;
-  const top = new Physics(p, { motorMismatch: false, batterySag: false, grip: true }).nominalTopSpeed();
+  const problems = profileProblems(p);
+  const top = problems.length ? NaN : new Physics(p, { motorMismatch: false, batterySag: false, grip: true }).nominalTopSpeed();
   const span = (p.sensor.channels - 1) * p.sensor.spacing_mm;
 
   return (
@@ -32,6 +33,12 @@ export function RobotPanel({ profile: p, preset, onChange, onExport, onImport }:
         </div>
       </div>
 
+      {problems.length > 0 && (
+        <div className="callout warn" role="alert">
+          <strong>Fix these before running:</strong>
+          <ul className="messages">{problems.map((m) => <li key={m}>{m}</li>)}</ul>
+        </div>
+      )}
       <div className={`callout ${fits ? 'ok' : 'warn'}`}>
         {fits
           ? `Fits the ${preset.name} limit of ${preset.maxRobotL_mm} × ${preset.maxRobotW_mm} mm.`
@@ -71,12 +78,17 @@ export function RobotPanel({ profile: p, preset, onChange, onExport, onImport }:
         <NumField label="Stall current" unit="A" value={p.motor.stallCurrent_A} min={0.01} step={0.1} onChange={(v) => setM('stallCurrent_A', v)} />
         <NumField label="Gear ratio" unit=": 1" value={p.motor.gearRatio} min={1} onChange={(v) => setM('gearRatio', v)} />
         <NumField label="Right motor weaker by" unit="%" value={p.motor.mismatch_pct} min={0} step={0.5} onChange={(v) => setM('mismatch_pct', v)} />
+        <NumField label="Static friction (estimate)" unit="× running" value={p.motor.stictionFactor ?? 2.5} min={1} max={10} step={0.1} onChange={(v) => setM('stictionFactor', v)}
+          hint="Breakaway friction in the gearbox ÷ friction while turning. Sets the small duty at which a wheel starts to move (estimate 2.5)." />
       </Group>
 
       <Group title="Driver and battery">
         <SelectField<DriverModel> label="Motor driver" value={p.driver} onChange={(v) => set('driver', v)}
           options={[{ value: 'TB6612FNG', label: 'TB6612FNG' }, { value: 'L298N', label: 'L298N (about 2 V drop)' }]} />
-        <NumField label="PWM frequency" unit="Hz" value={p.pwmFreq_Hz} min={50} onChange={(v) => set('pwmFreq_Hz', v)} />
+        <NumField label="PWM frequency" unit="Hz" value={p.pwmFreq_Hz} min={50} onChange={(v) => set('pwmFreq_Hz', v)}
+          hint={p.pwmFreq_Hz < 1000
+            ? 'Below about 1 kHz the motor current ripples within each pulse; the simulator uses the average and will be optimistic at low duty.'
+            : 'Kept with the robot file. The motor model uses the average voltage of the PWM, which is accurate at this frequency, so the frequency itself does not change a run.'} />
         <NumField label="PWM resolution" unit="bits" value={p.pwmBits} min={4} max={16} onChange={(v) => set('pwmBits', Math.round(v))} />
         <NumField label="Battery full" unit="V" value={p.battery.fullV} min={1} step={0.1} onChange={(v) => setB('fullV', v)} />
         <NumField label="Battery nominal" unit="V" value={p.battery.nominalV} min={1} step={0.1} onChange={(v) => setB('nominalV', v)} />

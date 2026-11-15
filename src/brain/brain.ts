@@ -23,7 +23,8 @@ export interface BrainIO {
   nowMs(): number;                 // time since power-on, ms (like millis())
   setMotors(left: number, right: number): void; // PWM duty -1..1 (negative = reverse)
   encoders(): { left: number; right: number; cpr: number } | null; // null if the robot has no encoders
-  // Distance each wheel has rolled, m: from encoder ticks if fitted, otherwise the known wheel speed (spec).
+  // Distance each wheel has rolled, m: from encoder counts if fitted, otherwise estimated from the commanded duty and
+  // the known (no-load) wheel speed — an estimate that drifts, like dead reckoning on a real robot.
   wheelOdometry(): { left_m: number; right_m: number };
   odometry_m(): number;            // distance travelled estimate (mean of the wheels)
   memory: Record<string, unknown>; // EEPROM/NVS: kept between a run and its memory run

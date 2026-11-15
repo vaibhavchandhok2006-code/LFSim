@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { loadSampleTrack } from '../testutil';
-import { edt } from './importTrack';
+import { chooseThreshold, edt, processTrack, resampleGray } from './importTrack';
+import { PRESETS } from './track';
 
 describe('distance transform', () => {
   it('matches exact distances on a small grid', () => {
@@ -48,5 +49,38 @@ describe('Robo-Run sample import', () => {
     }
     expect(best * t.res * 100).toBeGreaterThan(3.4);
     expect(best * t.res * 100).toBeLessThan(4.2);
+  });
+});
+
+describe('threshold and image shape (test report D7, D8)', () => {
+  // A dim photo: grey paper at 100, line at 30. The fixed 128 would make the whole mat black.
+  const W = 400;
+  const dim = new Uint8ClampedArray(W * W).fill(100);
+  for (let y = 190; y < 210; y += 1) for (let x = 20; x < 380; x += 1) dim[y * W + x] = 30;
+
+  it('a clean image keeps the fixed midpoint threshold', () => {
+    const clean = new Uint8ClampedArray(W * W).fill(255);
+    for (let y = 190; y < 210; y += 1) for (let x = 20; x < 380; x += 1) clean[y * W + x] = 0;
+    expect(chooseThreshold(resampleGray(clean, W, W, 200, 200))).toEqual({ threshold: 128, clean: true });
+  });
+
+  it('a dim image gets an Otsu threshold between paper and line', () => {
+    const t = chooseThreshold(resampleGray(dim, W, W, 200, 200));
+    expect(t.clean).toBe(false);
+    expect(t.threshold).toBeGreaterThan(30);
+    expect(t.threshold).toBeLessThan(100);
+    const { track, report } = processTrack(dim, W, W, { ...PRESETS[1], width_m: 1, height_m: 1 }, { normaliseWidth: false });
+    const darkShare = track.dark.reduce((a, b) => a + b, 0) / track.dark.length;
+    expect(darkShare).toBeGreaterThan(0.02);
+    expect(darkShare).toBeLessThan(0.1);
+    expect(report.messages.join(' ')).toContain('Otsu');
+  });
+
+  it('warns when the image shape does not match the track, and a crop fixes it', () => {
+    const wide = new Uint8ClampedArray(600 * 300).fill(255);
+    const preset = { ...PRESETS[1], width_m: 1, height_m: 1 };
+    expect(processTrack(wide, 600, 300, preset).report.messages.join(' ')).toContain('stretched');
+    const cropped = processTrack(wide, 600, 300, preset, { crop: { x0: 150, y0: 0, x1: 450, y1: 300 } });
+    expect(cropped.report.messages.join(' ')).not.toContain('stretched');
   });
 });
