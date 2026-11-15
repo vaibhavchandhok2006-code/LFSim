@@ -7,11 +7,23 @@ declare const self: DedicatedWorkerGlobalScope;
 let engine: Engine | null = null;
 let busy: Promise<void> = Promise.resolve();
 
+// Names firmware must never reach. Removing them only from the global object is not enough: firmware can recover the
+// global (e.g. via a Function constructor) and find them again on WorkerGlobalScope.prototype and friends, so they are
+// removed from every object on the global's prototype chain. Dynamic import() cannot be removed from JavaScript; the
+// page's Content-Security-Policy (inherited by this blob-URL worker) blocks it for any other origin.
+const NETWORK_AND_STORAGE = ['fetch', 'XMLHttpRequest', 'WebSocket', 'WebTransport', 'EventSource', 'importScripts', 'indexedDB',
+  'caches', 'Worker', 'SharedWorker', 'BroadcastChannel', 'Request', 'Response', 'Headers', 'navigator', 'location',
+  'RTCPeerConnection', 'WebSocketStream', 'cookieStore', 'storage'];
+
 function lockDown() {
-  // Firmware runs in this worker: remove network and storage APIs before any firmware is compiled.
-  const g = self as unknown as Record<string, unknown>;
-  for (const k of ['fetch', 'XMLHttpRequest', 'WebSocket', 'EventSource', 'importScripts', 'indexedDB', 'caches', 'Worker', 'SharedWorker', 'BroadcastChannel']) {
-    try { Object.defineProperty(g, k, { value: undefined, configurable: false, writable: false }); } catch { /* ignore */ }
+  let o: object | null = self;
+  while (o && o !== Object.prototype) {
+    for (const k of NETWORK_AND_STORAGE) {
+      if (!Object.prototype.hasOwnProperty.call(o, k)) continue;
+      try { Object.defineProperty(o, k, { value: undefined, configurable: false, writable: false }); } catch { /* ignore */ }
+      try { delete (o as Record<string, unknown>)[k]; } catch { /* ignore */ }
+    }
+    o = Object.getPrototypeOf(o);
   }
 }
 

@@ -1,0 +1,83 @@
+import { it } from 'vitest';
+import { PNG } from 'pngjs';
+import fs from 'fs';
+import { loadSampleTrack } from './testutil';
+import { Simulation } from './sim/simulation';
+import { DEFAULT_PROFILE } from './sim/profile';
+import { DEFAULT_SETTINGS, SettingsBrain } from './brain/settings';
+import { buildGraph, adjacency, turnAngle } from './track/graph';
+// Junction exam: approach every junction along every edge, compare the reading with the graph, and check the turn.
+it('exam', () => {
+  const t0 = loadSampleTrack(); const g = buildGraph(t0); const adj = adjacency(g);
+  const W = (d: number) => ((d + 180) % 360 + 360) % 360 - 180;
+  let n = 0, readBad = 0, turnBad = 0, skipped = 0, nc = 0, rbc = 0, tbc = 0; const out: string[] = [];
+  const alg = (process.env.ALG ?? 'left-hand') as any;
+  // which edge is a point on (nearest edge point)
+  const edgeAt = (x: number, y: number) => { let be = -1, bd = 1e9; for (const e of g.edges) for (const p of e.pts) { const d = Math.hypot(p[0] - x, p[1] - y); if (d < bd) { bd = d; be = e.id; } } return { e: be, d: bd }; };
+  for (const [id, node] of g.nodes) {
+    if (node.degree < 3) continue;
+    const opts = adj.get(id)!;
+    for (const inc of opts) {
+      const e = g.edges[inc.edge];
+      // points from the node outward along this edge
+      const q = inc.dir > 0 ? e.pts : [...e.pts].reverse();
+      // the longest straight run (up to 22 cm, at least 14 cm) leading into the node
+      let k = -1;
+      for (const want of [0.22, 0.2, 0.18, 0.16, 0.14]) {
+        let acc = 0, kk = 1;
+        for (; kk < q.length; kk++) { acc += Math.hypot(q[kk][0] - q[kk - 1][0], q[kk][1] - q[kk - 1][1]); if (acc >= want) break; }
+        if (acc < want || kk >= q.length - 1) continue;
+        const ax = q[kk][0] - q[0][0], ay = q[kk][1] - q[0][1], L = Math.hypot(ax, ay);
+        let dev = 0; for (let j = 0; j <= kk; j++) dev = Math.max(dev, Math.abs(((q[j][0] - q[0][0]) * ay - (q[j][1] - q[0][1]) * ax) / L));
+        if (dev < 0.006) { k = kk; break; }
+      }
+      let curved = false;
+      if (k < 0) {
+        let acc = 0, kk = 1;
+        for (; kk < q.length - 1; kk++) { acc += Math.hypot(q[kk][0] - q[kk - 1][0], q[kk][1] - q[kk - 1][1]); if (acc >= 0.22) break; }
+        if (acc < 0.1) { skipped++; continue; }
+        k = Math.max(1, kk - 3); curved = true;
+      }
+      const kb = Math.max(0, k - 6); const th = curved ? Math.atan2(q[kb][1] - q[k][1], q[kb][0] - q[k][0]) : Math.atan2(q[0][1] - q[k][1], q[0][0] - q[k][0]);
+      // the line must be fairly straight there
+      const tr = { ...t0, startPose: { x: q[k][0], y: q[k][1], theta: th } } as any;
+      const s = new Simulation(tr, DEFAULT_PROFILE, new SettingsBrain({ ...DEFAULT_SETTINGS, algorithm: alg }));
+      let dec: any = null;
+      const focus = process.env.JNODE && Number(process.env.JNODE) === id && Number(process.env.EDGE) === inc.edge;
+      const trail: [number, number, string][] = [];
+      if (focus) (globalThis as any).__lfsimJunctionDebug = (gr: string) => console.log('GRID\n' + gr.split('\n').filter((l) => l.trim()).join('\n'));
+      for (let i = 0; i < 400 && !dec; i++) { s.advance(0.01); const bb: any = (s as any).body; trail.push([bb.x, bb.y, s.brain.state()]); dec = s.decisions.find((d: any) => d.kind !== 'finish'); }
+      (globalThis as any).__lfsimJunctionDebug = undefined;
+      if (focus) {
+        const res = t0.res, X0 = node.x - 0.2, Y0 = node.y - 0.2, Z = 3, Wd = Math.round(0.4 / res * Z);
+        const png = new PNG({ width: Wd, height: Wd });
+        for (let y = 0; y < Wd; y++) for (let x = 0; x < Wd; x++) { const tx = Math.floor((X0 + x / Z * res) / res), ty = Math.floor((Y0 + y / Z * res) / res); const v = 255 - Math.round(200 * (t0.dark[ty * t0.w + tx] ?? 0)); const ii = (y * Wd + x) * 4; png.data[ii] = v; png.data[ii + 1] = v; png.data[ii + 2] = v; png.data[ii + 3] = 255; }
+        const dot = (x: number, y: number, c: number[], r = 1) => { const px = Math.round((x - X0) / res * Z), py = Math.round((y - Y0) / res * Z); for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) { const X = px + dx, Y = py + dy; if (X < 0 || Y < 0 || X >= Wd || Y >= Wd) continue; const ii = (Y * Wd + X) * 4; png.data[ii] = c[0]; png.data[ii + 1] = c[1]; png.data[ii + 2] = c[2]; } };
+        const off = DEFAULT_PROFILE.sensorOffset_mm / 1000;
+        for (const [x, y, st] of trail) dot(x, y, st.startsWith('Junction') ? [0, 170, 0] : [0, 90, 255]);
+        for (let i = 0; i < trail.length; i += 5) { const a = trail[i], b2 = trail[Math.min(trail.length - 1, i + 1)]; const th = Math.atan2(b2[1] - a[1], b2[0] - a[0]); dot(a[0] + off * Math.cos(th), a[1] + off * Math.sin(th), [255, 150, 0], 0); }
+        dot(node.x, node.y, [255, 0, 255], 3); dot(dec.x, dec.y, [255, 0, 0], 3);
+        fs.writeFileSync('/tmp/exam.png', PNG.sync.write(png));
+        console.log('FOCUS decision', JSON.stringify(dec));
+      }
+      if (!dec) { out.push(`  NODEC node ${id} (${node.x.toFixed(2)},${node.y.toFixed(2)}) from edge ${inc.edge}`); n++; readBad++; continue; }
+      // truth: arriving along inc (reverse dir), options = others
+      const arrive = { edge: inc.edge, dir: (-inc.dir) as 1 | -1 };
+      const truth = opts.filter((o) => !(o.edge === inc.edge && o.dir === inc.dir)).map((o) => ({ o, t: turnAngle(g, arrive.edge, arrive.dir, o.edge, o.dir) })).sort((a, b) => b.t - a.t);
+      const got: number[] = dec.branches_deg;
+      const ok = got.length === truth.length && truth.every((x, i) => Math.abs(x.t - got[i]) < 30);
+      n++;
+      // turn check: run on 1.2 s after the turn and see which edge the axle is on
+      const pick = alg === 'right-hand' ? truth[truth.length - 1] : truth[0];
+      let followFor = 0;
+      for (let i = 0; i < 300; i++) { s.advance(0.01); if (s.brain.state() === 'Following line') followFor++; else followFor = 0; if (followFor > 8) break; }
+      const b: any = (s as any).body; const off = DEFAULT_PROFILE.sensorOffset_mm / 1000; const at = edgeAt(b.x + off * Math.cos(b.theta), b.y + off * Math.sin(b.theta));
+      const turnOk = !ok ? null : at.e === pick.o.edge;
+      if (!ok) readBad++;
+      if (turnOk === false) turnBad++;
+      if (curved) { nc++; if (!ok) rbc++; if (turnOk === false) tbc++; }
+      if (!ok || turnOk === false || process.env.ALL) out.push(`  ${curved ? 'C' : ' '}${ok ? '  ' : 'RB'} ${turnOk === false ? 'TB' : '  '} node ${id} (${node.x.toFixed(2)},${node.y.toFixed(2)}) in e${inc.edge} truth [${truth.map((x) => Math.round(x.t)).join(',')}] got [${got.join(',')}] at (${dec.x.toFixed(2)},${dec.y.toFixed(2)}) chose ${dec.kind}; after turn on e${at.e} want e${pick.o.edge}`);
+    }
+  }
+  console.log(`EXAM ${alg}: approaches ${n}, misread ${readBad}, wrong turn ${turnBad}, skipped(short edge) ${skipped}; of which curved/short approaches ${nc}, misread ${rbc}, wrong turn ${tbc}\n${out.join('\n')}`);
+}, 900000);

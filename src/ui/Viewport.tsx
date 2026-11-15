@@ -170,7 +170,7 @@ export function Viewport(props: Props) {
       }
       for (const e of r0.events) {
         if (e.t > t) break;
-        if (e.kind === 'offline' || e.kind === 'aborted') {
+        if (e.kind === 'offline' || e.kind === 'code-stopped') {
           ctx.strokeStyle = COLORS.off; ctx.lineWidth = 2.5 / px;
           const d = 7 / px;
           ctx.beginPath(); ctx.moveTo(e.x - d, e.y - d); ctx.lineTo(e.x + d, e.y + d); ctx.moveTo(e.x + d, e.y - d); ctx.lineTo(e.x - d, e.y + d); ctx.stroke();

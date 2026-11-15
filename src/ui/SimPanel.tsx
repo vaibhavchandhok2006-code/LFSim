@@ -29,18 +29,17 @@ export function SimPanel({ flags, onFlags, dist, onDist, view, onView, run, t, m
   const ended = run && run.endTime !== null && t >= run.endTime - 1e-6;
   const status = !run ? 'Not run yet'
     : run.status === 'error' ? `Error: ${run.error}`
-    : r?.aborted ? 'Aborted: re-entered the start square'
-    : r?.finish != null ? 'Reached the finish'
+    : r?.finish != null ? (ended ? 'Reached the finish' : 'Reached the finish — timer stopped. Press Stop to end the run.')
     : ended ? 'Did not finish' : 'Running';
   return (
     <div className="panel-scroll">
       <Group title="Run result">
-        <p className={`status-line ${r?.finish != null ? 'ok' : run?.status === 'error' || r?.aborted || ended ? 'bad' : ''}`}>{status}</p>
+        <p className={`status-line ${r?.finish != null ? 'ok' : run?.status === 'error' || ended ? 'bad' : ''}`}>{status}</p>
         <dl className="result">
           <dt>Run time</dt><dd>{fmt(r?.runTime ?? null)}</dd>
           <dt>Off the line</dt><dd>{r ? `${r.offLine} time${r.offLine === 1 ? '' : 's'}` : '—'}</dd>
           <dt>Time score</dt><dd>{fmt(r?.score ?? null)}</dd>
-          <dt>Code saw the finish</dt><dd>{r ? (r.codeStopped ? 'Yes, and stopped' : 'No') : '—'}</dd>
+          <dt>Code saw the finish</dt><dd>{r ? (r.codeStopped ? 'Yes, and stopped' : r.codeStoppedElsewhere ? 'No — it stopped away from the finish' : 'No') : '—'}</dd>
           <dt>Junction decisions</dt><dd>{r ? r.decisions : '—'}</dd>
           <dt>Dead ends</dt><dd>{r ? r.deadEnds : '—'}</dd>
           <dt>Distance</dt><dd>{r ? `${r.distance.toFixed(2)} m` : '—'}</dd>

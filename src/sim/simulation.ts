@@ -3,6 +3,8 @@
 
 import { Brain, BrainIO, DecisionRecord } from '../brain/brain';
 import { Track, inRect, distanceToLine } from '../track/track';
+import { buildGraph } from '../track/graph';
+import { ShortcutJudge } from './judge';
 import { BodyState, initialBody, Physics, PhysicsFlags } from './physics';
 import { RobotProfile } from './profile';
 import { Disturb, Rng, SensorArray, SensorFlags } from './sensors';
@@ -13,7 +15,7 @@ export const DEFAULT_FLAGS: SimFlags = { motorMismatch: true, batterySag: true, 
 export interface OffLineRule { distance_cm: number }
 
 export interface TrailPoint { x: number; y: number; v: number; off: boolean }
-export interface SimEvent { t: number; kind: 'start' | 'finish' | 'offline' | 'online' | 'brain-finished' | 'log' | 'left-mat' | 'aborted'; text: string; x: number; y: number }
+export interface SimEvent { t: number; kind: 'start' | 'finish' | 'offline' | 'online' | 'brain-finished' | 'code-stopped' | 'log' | 'left-mat' | 'start-reentry'; text: string; x: number; y: number }
 
 export interface DecisionEvent extends DecisionRecord { t: number; x: number; y: number }
 
@@ -50,6 +52,10 @@ export class Simulation {
   private nextSample = 0;
   private io: BrainIO;
   private leftMat = false;
+  private readonly judge: ShortcutJudge | null;
+  private offSinceJudge = false;   // an off-line event was counted since the judge last saw the axle on a line
+  private brainWasFinished = false;
+  private inStart = true;
 
   constructor(track: Track, profile: RobotProfile, brain: Brain, flags: SimFlags = DEFAULT_FLAGS, offRule: OffLineRule = { distance_cm: 4 }, memory: Record<string, unknown> = {}) {
     this.track = track;
@@ -63,6 +69,9 @@ export class Simulation {
     this.body = initialBody(sp.x, sp.y, sp.theta, profile);
     this.io = this.makeIO();
     this.sensors.read(track, this.body.x, this.body.y, this.body.theta);
+    let judge: ShortcutJudge | null = null;
+    try { judge = new ShortcutJudge(track, buildGraph(track)); } catch { judge = null; }
+    this.judge = judge;
     brain.reset(this.io);
   }
 
@@ -90,7 +99,9 @@ export class Simulation {
       decision: (rec) => { sim.decisions.push({ ...rec, t: sim.time, x: sim.body.x, y: sim.body.y }); },
       readSensors: () => sim.sensors.read(sim.track, sim.body.x, sim.body.y, sim.body.theta, sim.disturb).slice(),
       nowMs: () => sim.time * 1000,
-      setMotors: (l, r) => { sim.dutyL = l; sim.dutyR = r; },
+      // Settings mode drives the robot like a typical motor function: direction pins set, PWM = |duty|. On a TB6612FNG
+      // a duty of 0 is then a short brake; on an L298N (PWM on EN) it coasts.
+      setMotors: (l, r) => { sim.dutyL = l; sim.dutyR = r; const tb = sim.profile.driver === 'TB6612FNG'; sim.brakeL = tb && l === 0; sim.brakeR = tb && r === 0; },
       encoders: () => {
         const e = sim.profile.encoders;
         if (!e.present || !e.usedInCode) return null;
@@ -104,6 +115,15 @@ export class Simulation {
 
   private event(kind: SimEvent['kind'], text: string) {
     this.events.push({ t: this.time, kind, text, x: this.body.x, y: this.body.y });
+  }
+
+  // Axle within one robot length of the finish square.
+  private nearFinish(): boolean {
+    const f = this.track.finish;
+    if (!f) return false;
+    const res = this.track.res, m = this.profile.length_mm / 1000;
+    const x = this.body.x, y = this.body.y;
+    return x >= f.x0 * res - m && x <= f.x1 * res + m && y >= f.y0 * res - m && y <= f.y1 * res + m;
   }
 
   frontPoint(): [number, number] {
@@ -147,19 +167,20 @@ export class Simulation {
     if (this.startTime !== null && this.finishTime === null && inRect(this.track, this.track.finish, fx, fy)) {
       this.finishTime = this.time; this.event('finish', 'Front edge entered the finish square');
     }
-    // Rulebook: re-entering the start square before the finish aborts the run. Judged on the robot's centre
-    // (wheel axle), so a nose swinging over the square during a turn does not count.
-    if (this.startTime !== null && this.finishTime === null && this.distance > 0.3 && inRect(this.track, this.track.start, b.x, b.y)) {
-      this.event('aborted', 'Re-entered the start square — run aborted (rulebook)');
-      this.status = 'stopped';
-      return;
+    // Re-entering the start square is logged (judged on the axle centre, so a nose swinging over it during a turn
+    // does not count). The run is not ended: the spec has no automatic stop.
+    const inStart = inRect(this.track, this.track.start, b.x, b.y);
+    if (inStart && !this.inStart && this.startTime !== null && this.finishTime === null && this.distance > 0.3) {
+      this.event('start-reentry', 'Re-entered the start square');
     }
-    if (this.brain.finished() && !this.events.some((e) => e.kind === 'brain-finished')) {
-      this.event('brain-finished', 'Robot code recognised the finish and stopped');
+    this.inStart = inStart;
+    // "Code saw the finish": the robot's own code stopped it at the finish. A stop anywhere else is logged as such.
+    const fin = this.brain.finished();
+    if (fin && !this.brainWasFinished) {
+      if (this.finishTime !== null || this.nearFinish()) this.event('brain-finished', 'Robot code recognised the finish and stopped');
+      else this.event('code-stopped', `Robot code stopped the robot at (${b.x.toFixed(2)}, ${b.y.toFixed(2)}) m, not at the finish`);
     }
-    if ((this.finishTime !== null && this.brain.finished()) || (this.finishTime !== null && this.time - this.finishTime > 2)) {
-      this.status = 'finished';
-    }
+    this.brainWasFinished = fin;
 
     if (this.time >= this.nextSample) {
       this.nextSample += 0.01;
@@ -178,6 +199,15 @@ export class Simulation {
       }
     } else if (this.sensors.coverage.some((c) => c > 0.5)) {
       this.isOffLine = false; this.event('online', 'Back on the line');
+    }
+    if (this.isOffLine) this.offSinceJudge = true;
+    if (this.judge && this.startTime !== null) {
+      const ignore = inRect(this.track, this.track.start, b.x, b.y) || inRect(this.track, this.track.finish, b.x, b.y);
+      const shortcut = this.judge.update(b.x, b.y, ignore);
+      if (shortcut && !this.offSinceJudge) {
+        this.offLineCount += 1; this.event('offline', `Off the line (#${this.offLineCount}): crossed white to another line`);
+      }
+      if (this.judge.onLine && !this.isOffLine) this.offSinceJudge = false;
     }
     const t = this.track;
     const outside = b.x < 0 || b.y < 0 || b.x > t.w * t.res || b.y > t.h * t.res;

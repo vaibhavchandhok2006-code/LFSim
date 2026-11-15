@@ -68,7 +68,8 @@ export function reportHtml(o: { title: string; profile: RobotProfile; settings: 
   if (r.finish === null) issues.push('The robot did not reach the finish.');
   if (r.finish !== null && !r.codeStopped) issues.push('The robot reached the finish square but its code did not recognise it and stop.');
   if (r.offLine) issues.push(`The robot left the line ${r.offLine} time(s), adding ${((r.offLine / 20) * (r.runTime ?? 0)).toFixed(2)} s of penalty.`);
-  if (r.aborted) issues.push('The robot re-entered the start square, which aborts the run under the rules.');
+  if (r.codeStoppedElsewhere) issues.push('The robot\'s code stopped the robot away from the finish (see the event log for where).');
+  if (r.startReentries) issues.push(`The robot re-entered the start square ${r.startReentries} time(s).`);
   if (run.error) issues.push(`Error: ${run.error}`);
   const dec = run.decisions.filter((d) => d.t <= t);
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>${esc(o.title)}</title>

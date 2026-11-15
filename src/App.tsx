@@ -120,13 +120,21 @@ export default function App() {
       id: Date.now(), label: `${algo}${isMemoryRun ? ' (memory run)' : ''}`, algorithm: algo, robot: app.profile.name, track: app.track.imageName,
       memoryRun: isMemoryRun, reachedFinish: r.finish !== null, codeStopped: r.codeStopped, runTime_s: r.runTime, score_s: r.score,
       distance_m: r.distance, decisions: r.decisions, deadEnds: r.deadEnds, offLine: r.offLine,
-      status: d.status === 'error' ? 'Error' : r.aborted ? 'Aborted' : r.finish !== null ? 'Finished' : 'Did not finish',
+      status: d.status === 'error' ? 'Error' : r.finish !== null ? 'Finished' : 'Did not finish',
       path: d.path(at, 500),
       settingsNote: app.brainMode === 'code' ? `Code mode, ${app.code.sourceLang || 'firmware'}` : `Kp ${s.kp}, Kd ${s.kd}, base ${s.baseSpeed}, turn ${s.turnSpeed}`,
     };
     setRuns((rs) => [summary, ...rs].slice(0, 100));
     if (d.memory && Object.keys(d.memory).length && r.finish !== null && !isMemoryRun) setMemory({ key: memKey, data: d.memory });
   }, [app, isMemoryRun, memKey]);
+
+  // A memory run becomes available as soon as run 1 reaches the finish (the run itself goes on until Stop).
+  const memSavedFor = useRef(-1);
+  useEffect(() => {
+    if (!ctl || isMemoryRun || memSavedFor.current === ctl.runId) return;
+    const d = ctl.data;
+    if (d.memory && Object.keys(d.memory).length && d.at(playT).finish !== null) { memSavedFor.current = ctl.runId; setMemory({ key: memKey, data: d.memory }); }
+  }, [ctl, frame, playT, isMemoryRun, memKey]);
 
   // Playback loop: advance the playback clock and keep the worker computing ahead.
   useEffect(() => {
@@ -324,7 +332,7 @@ export default function App() {
   const preset = presetFor(app.track);
   const r = run?.at(playT);
   const statusText = !track ? 'Loading track' : !run ? 'Ready at the start' : run.status === 'error' ? 'Error'
-    : ended ? (r?.finish != null ? 'Finished' : r?.aborted ? 'Aborted' : 'Did not finish') : playing ? (isMemoryRun ? 'Memory run' : 'Running') : 'Paused';
+    : ended ? (r?.finish != null ? 'Finished' : 'Did not finish') : playing ? (isMemoryRun ? 'Memory run' : 'Running') : 'Paused';
   const maxT = run ? Math.max(run.endTime ?? run.computedTime, playT) : 0;
   const isMemoryAlgo = app.brainMode === 'settings' && MEMORY_ALGORITHMS.includes(app.settings.algorithm);
   const showRun = tab !== 'robot' && tab !== 'compare';

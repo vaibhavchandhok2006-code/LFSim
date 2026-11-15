@@ -111,7 +111,9 @@ export class Engine {
       type: 'frames', runId: this.runId, stride: this.stride, frames, states: this.states.slice(), events, decisions,
       console: this.consoleOut.splice(0), time: s.time, status: this.status, error: this.error, idealHz: 1 / this.recordDt,
     };
-    if (this.status !== 'running') out.memory = JSON.parse(JSON.stringify(s.memory));
+    // Memory (EEPROM/NVS) is sent once the robot has reached the finish, so a memory run is available without waiting
+    // for the user to press Stop.
+    if (this.status !== 'running' || s.finishTime !== null) out.memory = JSON.parse(JSON.stringify(s.memory));
     return out;
   }
 

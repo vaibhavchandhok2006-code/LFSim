@@ -1,0 +1,55 @@
+import { it } from 'vitest';
+import { loadSampleTrack } from './testutil';
+import { Simulation } from './sim/simulation';
+import { DEFAULT_PROFILE } from './sim/profile';
+import { DEFAULT_SETTINGS, SettingsBrain } from './brain/settings';
+import { buildGraph, adjacency, turnAngle } from './track/graph';
+// Decision audit: in a real run, check every junction decision against the graph (given where the robot really came from).
+const algs = (process.env.ALGS ?? 'left-hand,right-hand').split(',');
+for (const alg of algs) it(alg, () => {
+  const t = loadSampleTrack(); const g = buildGraph(t); const adj = adjacency(g);
+  const off = DEFAULT_PROFILE.sensorOffset_mm / 1000;
+  const s = new Simulation(t, DEFAULT_PROFILE, new SettingsBrain({ ...DEFAULT_SETTINGS, algorithm: alg as any, ...(process.env.PRM ? JSON.parse(process.env.PRM) : {}) }));
+  const edgeAt = (x: number, y: number) => { let be = -1, bd = 1e9; for (const e of g.edges) for (let i = 0; i < e.pts.length; i += 2) { const p = e.pts[i]; const d = Math.hypot(p[0] - x, p[1] - y); if (d < bd) { bd = d; be = e.id; } } return be; };
+  const missedAt = new Map<number, number>(); let lastDecT = -9;
+  let last = '', eIn = -1, nd = 0, pending: any = null, followN = 0;
+  let ok = 0, bad = 0, unk = 0; const out: string[] = [];
+  const T = Number(process.env.SECS ?? 120);
+  for (let k = 0; k < T * 100 && !(s.finishTime !== null); k++) {
+    s.advance(0.01);
+    const b: any = (s as any).body, st = s.brain.state();
+    if (st.startsWith('Junction') && !last.startsWith('Junction') && !pending) eIn = edgeAt(b.x, b.y);
+    if (st === 'Following line') for (const nn of g.nodes.values()) if (nn.degree >= 3 && Math.hypot(nn.x - b.x, nn.y - b.y) < 0.03 && s.time - lastDecT > 1.0 && s.time - (missedAt.get(nn.id) ?? -9) > 2) { missedAt.set(nn.id, s.time); bad++; out.push(`  MISSED t=${s.time.toFixed(1)} node ${nn.id} (${nn.x.toFixed(2)},${nn.y.toFixed(2)}) degree ${nn.degree}`); }
+    while (s.decisions.length > nd) {
+      const d: any = s.decisions[nd]; nd++;
+      if (d.kind === 'finish') continue;
+      pending = { d, eIn, x: b.x, y: b.y }; lastDecT = s.time;
+    }
+    if (pending && st === 'Following line') followN++; else followN = 0;
+    if (pending && followN >= 10) {
+      const eOut = edgeAt(b.x + off * Math.cos(b.theta), b.y + off * Math.sin(b.theta));
+      // node: nearest degree>=3 node to the axle at decision
+      let node: any = null, bd = 1e9;
+      for (const n of g.nodes.values()) { const dd = Math.hypot(n.x - pending.x, n.y - pending.y); if (dd < bd) { bd = dd; node = n; } }
+      let verdict = '?', want = -1;
+      if (node && bd < 0.07) {
+        const inc = adj.get(node.id)!.find((o) => o.edge === pending.eIn);
+        if (inc) {
+          const arrive = { edge: inc.edge, dir: (-inc.dir) as 1 | -1 };
+          const opts = adj.get(node.id)!.filter((o) => !(o.edge === inc.edge && o.dir === inc.dir));
+          if (!opts.length) want = inc.edge; else {
+            const sc = opts.map((o) => ({ o, t: turnAngle(g, arrive.edge, arrive.dir, o.edge, o.dir) }));
+            want = (alg === 'right-hand' ? sc.reduce((a, c) => (c.t < a.t ? c : a)) : sc.reduce((a, c) => (c.t > a.t ? c : a))).o.edge;
+          }
+          verdict = eOut === want ? 'ok' : 'BAD';
+        }
+      }
+      if (verdict === '?' && !(node && bd < 0.07)) { want = pending.eIn; verdict = eOut === pending.eIn ? 'ok' : 'BADCORNER'; }
+      if (verdict === 'ok') ok++; else if (verdict.startsWith('BAD')) bad++; else unk++;
+      if (verdict !== 'ok') out.push(`  ${verdict} t=${pending.d.t.toFixed(1)} (${pending.x.toFixed(2)},${pending.y.toFixed(2)}) node ${node ? `${node.id}@${bd.toFixed(3)}` : '-'} in e${pending.eIn} ${pending.d.kind} [${pending.d.branches_deg}] -> e${eOut} want e${want}`);
+      pending = null;
+    }
+    last = st;
+  }
+  console.log(`AUDIT ${alg}: finish ${s.finishTime !== null ? s.runTime()!.toFixed(1) : 'NO'} dist ${s.distance.toFixed(2)} ok ${ok} BAD ${bad} unknown ${unk} off ${s.offLineCount}\n${out.slice(0, Number(process.env.SHOW ?? 25)).join('\n')}`);
+}, 900000);

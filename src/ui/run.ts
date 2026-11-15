@@ -1,3 +1,4 @@
+import simWorkerUrl from '../worker/simWorker.ts?worker&url';
 // Main-thread side of a run: owns the worker, stores the recorded frames, and answers "what was true at time t".
 
 import { DecisionEvent, SimEvent } from '../sim/simulation';
@@ -99,7 +100,8 @@ export class RunData {
       start, finish, offLine: off, runTime,
       score: runTime === null ? null : runTime + (off / 20) * runTime,
       codeStopped: ev.some((e) => e.kind === 'brain-finished'),
-      aborted: ev.some((e) => e.kind === 'aborted'),
+      codeStoppedElsewhere: ev.some((e) => e.kind === 'code-stopped'),
+      startReentries: ev.filter((e) => e.kind === 'start-reentry').length,
       decisions: dec.length,
       deadEnds: dec.filter((d) => d.kind === 'B').length,
       distance: this.distanceAt(Math.max(0, this.indexAt(t))),
@@ -129,7 +131,13 @@ export class RunController {
 
   constructor(start: Omit<StartMsg, 'type' | 'runId'>) {
     this.runId = Math.floor(Math.random() * 1e9);
-    this.worker = new Worker(new URL('../worker/simWorker.ts', import.meta.url), { type: 'module' });
+    // The worker starts from a blob: URL so it inherits this page's Content-Security-Policy (a worker loaded from its
+    // own URL would not, on a host that sends no CSP header). The policy blocks firmware from loading remote code.
+    const entry = new URL(simWorkerUrl, location.href).href;
+    const blob = new Blob([`import ${JSON.stringify(entry)};`], { type: 'text/javascript' });
+    const blobUrl = URL.createObjectURL(blob);
+    this.worker = new Worker(blobUrl, { type: 'module' });
+    setTimeout(() => URL.revokeObjectURL(blobUrl), 10000);
     this.worker.onmessage = (ev: MessageEvent<FromWorker>) => {
       const m = ev.data;
       if (m.runId !== this.runId) return;
