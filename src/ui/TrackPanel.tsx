@@ -66,7 +66,7 @@ export function TrackPanel({ setup, track, messages, loading, imageSize, offLine
         <NumField label="Right" unit="%" value={crop.right_pct} min={0} max={45} step={0.5} onChange={(v) => setCrop('right_pct', v)} />
         <NumField label="Top" unit="%" value={crop.top_pct} min={0} max={45} step={0.5} onChange={(v) => setCrop('top_pct', v)} />
         <NumField label="Bottom" unit="%" value={crop.bottom_pct} min={0} max={45} step={0.5} onChange={(v) => setCrop('bottom_pct', v)} />
-        <div className="row-buttons">
+        <div className="row-buttons left crop-buttons">
           <button disabled={!imageSize} onClick={fitCrop}>Crop centre to the track's shape</button>
           <button onClick={() => onChange({ ...setup, crop: { left_pct: 0, top_pct: 0, right_pct: 0, bottom_pct: 0 } })}>No crop</button>
         </div>

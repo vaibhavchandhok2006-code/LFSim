@@ -17,14 +17,14 @@ It is made for competitions with loops, curves, squares, dead ends and a finish 
 - **Physics** — 1 kHz simulation of DC motors, driver, battery sag, mass, inertia and tyre grip (fast turns skid).
 - **Sensors** — spot averaging, height-dependent contrast, noise and sensor mismatch; optional uneven lighting
   and mat folds/bumps.
-- **Settings mode** — PID line following with junction scans and seven maze algorithms: left-hand, right-hand,
+- **Settings mode** — PID line following; junctions read from what the sensors saw while rolling over them (no look-around spin); seven maze algorithms: left-hand, right-hand,
   straight-first, custom priority, LSRB (branch numbers counted from the left) and Trémaux mapping, with
   memory runs for LSRB and Trémaux.
 - **Code mode** — run your own Arduino / ESP-IDF firmware, translated to LFSim firmware JS
-  (see [docs/FIRMWARE_API.md](docs/FIRMWARE_API.md)), against a simulated ESP32 + driver, with a serial console
+  (see [docs/FIRMWARE_API.md](docs/FIRMWARE_API.md)), against a simulated ESP32 (or Arduino Uno/Nano) + driver, in a locked-down sandbox, with a serial console
   and a side-by-side view of the original code.
-- **Rulebook timing** — timer from leaving start to entering finish, judge-style off-line count, start-square abort.
-  No auto-stop: you stop the run.
+- **Rulebook timing** — timer from leaving start to entering finish, judge-style off-line count (including crossing
+  white to another line), start-square re-entry logged. No auto-stop: you stop the run.
 - **Analysis** — timeline scrub and step, live graphs (error/PID, wheel speeds/PWM, battery, raw sensors),
   decision log with map markers, Compare tab with path overlays.
 - **Exports** — HTML report, CSV, PNG path image, WebM video, GIF clip, robot / track / project files

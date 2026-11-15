@@ -53,6 +53,7 @@ export class Simulation {
   disturb: Disturb | undefined;
   onConsole: ((t: number, text: string) => void) | null = null;
   private nextBrain = 0;
+  private brainTime = 0; // time of the current brain tick (sub-step resolution)
   private nextSample = 0;
   private io: BrainIO;
   private leftMat = false;
@@ -94,7 +95,7 @@ export class Simulation {
       memory: this.memory,
       decision: (rec) => { sim.decisions.push({ ...rec, t: sim.time, x: sim.body.x, y: sim.body.y }); },
       readSensors: () => sim.sensors.read(sim.track, sim.body.x, sim.body.y, sim.body.theta, sim.disturb).slice(),
-      nowMs: () => sim.time * 1000,
+      nowMs: () => sim.brainTime * 1000,
       // Settings mode drives the robot like a typical motor function: direction pins set, PWM = |duty|. On a TB6612FNG
       // a duty of 0 is then a short brake; on an L298N (PWM on EN) it coasts.
       setMotors: (l, r) => { sim.dutyL = l; sim.dutyR = r; const tb = sim.profile.driver === 'TB6612FNG'; sim.brakeL = tb && l === 0; sim.brakeR = tb && r === 0; },
@@ -154,14 +155,18 @@ export class Simulation {
   tick(): void {
     if (this.status === 'finished' || this.status === 'stopped') return;
     this.status = 'running';
-    if (this.time >= this.nextBrain) {
-      this.brain.tick(this.io);
-      this.nextBrain += 1 / this.brain.loopHz;
-    }
     const b = this.body;
     const px = b.x, py = b.y;
     const h = TICK / SUB;
-    for (let k = 0; k < SUB; k += 1) this.physics.step(b, this.dutyL, this.dutyR, h, this.brakeL, this.brakeR);
+    // The brain runs on its own schedule, checked every physics sub-step (0.25 ms), so loop rates up to 4 kHz work.
+    for (let k = 0; k < SUB; k += 1) {
+      if (this.brain.loopHz > 0 && this.time + k * h >= this.nextBrain - 1e-12) {
+        this.brainTime = this.time + k * h;
+        this.brain.tick(this.io);
+        this.nextBrain += 1 / this.brain.loopHz;
+      }
+      this.physics.step(b, this.dutyL, this.dutyR, h, this.brakeL, this.brakeR);
+    }
     if (!this.profile.encoders.present) {
       const wMax = (this.physics.nominalTopSpeed() / this.physics.wheelR) * (this.profile.battery.nominalV / this.profile.battery.fullV);
       const a = TICK / 0.06;

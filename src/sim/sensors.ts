@@ -69,7 +69,7 @@ export class SensorArray {
   // disturb(px, py): disturbance at a floor point — extra sensor height from a mat bump (mm) and an ambient-light
   // shift in raw ADC counts. Undefined = clean conditions.
   read(t: Track, x: number, y: number, theta: number, disturb?: Disturb): number[] {
-    for (let i = 0; i < this.n; i += 1) this.raw[i] = this.readOne(i, t, x, y, theta, disturb);
+    for (let i = 0; i < this.n; i += 1) this.readOne(i, t, x, y, theta, disturb);
     return this.raw;
   }
 
@@ -92,6 +92,7 @@ export class SensorArray {
     const g = this.flags.mismatch ? this.gains[i] : 1;
     let v = mid + half * g * (2 * cov - 1) + ambientShift;
     if (this.flags.noise) v += sigma * this.rng.gauss();
-    return Math.round(Math.max(0, Math.min(this.maxRaw, v)));
+    this.raw[i] = Math.round(Math.max(0, Math.min(this.maxRaw, v))); // latest conversion, for the log and the view
+    return this.raw[i];
   }
 }

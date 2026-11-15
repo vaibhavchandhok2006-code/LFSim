@@ -41,7 +41,7 @@ function SettingsForm({ s, set }: { s: SettingsParams; set: <K extends keyof Set
   const orderOk = /^[LSRB]{1,4}$/i.test(s.customOrder) && new Set(s.customOrder.toUpperCase()).size === s.customOrder.length;
   return (
     <>
-      <p className="panel-note">The built-in robot: PID on the analog line position. At a junction it rolls onto it, spins once to find every branch, then turns onto the one the algorithm picks.</p>
+      <p className="panel-note">The built-in robot: PID on the analog line position. At a junction it rolls onto it, reads the branches from what its sensors saw on the way (no look-around spin), then turns onto the one the algorithm picks.</p>
       <Group title="Algorithm">
         <SelectField label="At junctions" value={s.algorithm} options={ALGOS} onChange={(v) => set('algorithm', v)}
           hint={MEMORY_ALGORITHMS.includes(s.algorithm) ? 'Run 1 explores and saves memory. Then use "Run again with memory" in Simulate.' : undefined} />
@@ -73,26 +73,29 @@ function SettingsForm({ s, set }: { s: SettingsParams; set: <K extends keyof Set
         <NumField label="Kd" unit="duty/(mm/s)" step={0.0001} min={0} value={s.kd} onChange={(v) => set('kd', v)} />
         <NumField label="Integral limit" unit="duty" step={0.05} min={0} value={s.iLimit} onChange={(v) => set('iLimit', v)} />
         <NumField label="D filter" unit="Hz" step={5} min={0} value={s.dFilterHz} onChange={(v) => set('dFilterHz', v)} hint="Low-pass on the derivative so sensor noise doesn't shake the motors. 0 = off." />
-        <NumField label="Loop rate" unit="Hz" step={50} min={10} max={1000} value={s.loopHz} onChange={(v) => set('loopHz', v)} hint="How often the code reads sensors and updates motors." />
+        <NumField label="Loop rate" unit="Hz" step={50} min={10} max={2000} value={s.loopHz} onChange={(v) => set('loopHz', v)} hint="How often the code reads sensors and updates motors." />
       </Group>
 
       <Group title="Speeds" note="As PWM duty, 0 to 1.">
         <NumField label="Base speed" step={0.02} min={0} max={1} value={s.baseSpeed} onChange={(v) => set('baseSpeed', v)} />
         <NumField label="Max per wheel" step={0.02} min={0} max={1} value={s.maxSpeed} onChange={(v) => set('maxSpeed', v)} />
-        <NumField label="Turn speed" step={0.02} min={0} max={1} value={s.turnSpeed} onChange={(v) => set('turnSpeed', v)} hint="In-place turns, the junction scan and line search." />
+        <NumField label="Turn speed" step={0.02} min={0} max={1} value={s.turnSpeed} onChange={(v) => set('turnSpeed', v)} hint="In-place turns at junctions and the line search." />
         <NumField label="Acceleration limit" unit="duty/s" step={0.1} min={0.1} value={s.accel} onChange={(v) => set('accel', v)} />
       </Group>
 
       <Group title="Junctions">
-        <NumField label="Outer sensors for a branch" step={1} min={1} value={s.junctionOuter} onChange={(v) => set('junctionOuter', Math.round(v))} hint="This many outermost sensors on a side, plus a centre sensor, must see black." />
-        <NumField label="Inch forward" unit="cm" step={0.5} min={0} value={s.inchForward_cm} onChange={(v) => set('inchForward_cm', v)} hint="Roll this far after detecting a junction, so the axle sits over it." />
+      <p className="group-text">An outermost sensor seeing black (with the centre) starts a junction. While rolling over it the robot maps what its sensors saw and reads the branches from that map — no look-around scan.</p>
+        <SelectField<'auto' | 'manual'> label="Roll onto the junction" value={s.inchMode} onChange={(v) => set('inchMode', v)}
+          options={[{ value: 'auto', label: 'Auto: until the axle is over the junction centre' }, { value: 'manual', label: 'Fixed distance (below)' }]} />
+        {s.inchMode === 'manual' && <NumField label="Inch forward" unit="cm" step={0.5} min={0} value={s.inchForward_cm} onChange={(v) => set('inchForward_cm', v)} hint="Roll this far after detecting a junction, so the axle sits over it." />}
         <SelectField label="Turn method" value={s.turnMethod} onChange={(v) => set('turnMethod', v)}
           options={[{ value: 'spin-until-line', label: 'Spin until the centre sensors find the line' }, { value: 'timed', label: 'Turn by measured angle (timed turn)' }]} />
         <NumField label="Dead end: all white for" unit="cm" step={0.5} min={0.5} value={s.deadEndWhite_cm} onChange={(v) => set('deadEndWhite_cm', v)} />
       </Group>
 
       <Group title="Finish and lost line">
-        <NumField label="Finish: all black for" unit="cm" step={0.5} min={1} value={s.finishBlack_cm} onChange={(v) => set('finishBlack_cm', v)} />
+        <NumField label="Finish: all black for" unit="cm" step={0.5} min={1} value={s.finishBlack_cm} onChange={(v) => set('finishBlack_cm', v)}
+          hint="An all-black patch within 60 cm of the start (by odometry) is taken as the start square, not the finish." />
         <NumField label="Give up searching after" unit="s" step={0.5} min={0.2} value={s.lostTimeout_s} onChange={(v) => set('lostTimeout_s', v)} hint="Line-following-only mode." />
       </Group>
     </>

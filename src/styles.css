@@ -276,3 +276,4 @@ button.icon { padding: 2px 6px; border: none; background: none; color: var(--ink
 .chart .u-legend { font-size: 11px; text-align: left; }
 .chart .u-legend .u-marker { width: 10px; height: 3px; }
 [data-theme='dark'] .chart .u-legend { color: var(--ink-2); }
+.crop-buttons { grid-column: 1 / -1; margin: 4px 0 0; }

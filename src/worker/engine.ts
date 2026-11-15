@@ -21,6 +21,7 @@ export class Engine {
   private sentDecisions = 0;
   private consoleOut: { t: number; text: string }[] = [];
   private csvRows: string[] = [];
+  private csvDecIdx = 0;
   private csvHeader: string;
   status: FramesMsg['status'] = 'running';
   error: string | undefined;
@@ -57,10 +58,13 @@ export class Engine {
     const row = [s.time, b.x, b.y, b.theta, b.angL, b.angR, ph.forwardSpeed(b), b.wL * ph.wheelR, b.wR * ph.wheelR, s.dutyL, s.dutyR,
       b.vBatt, b.iL, b.iR, b.slipping ? 1 : 0, s.isOffLine ? 1 : 0, tel.error_mm ?? NaN, tel.pid ?? NaN, this.stateId(state), 0, ...s.sensors.raw];
     for (const v of row) this.frames.push(v);
-    const lastDec = s.decisions.length && Math.abs(s.decisions[s.decisions.length - 1].t - s.time) < this.recordDt ? s.decisions[s.decisions.length - 1] : null;
-    this.csvRows.push([s.time.toFixed(4), b.x.toFixed(4), b.y.toFixed(4), ((b.theta * 180) / Math.PI).toFixed(2), row[F.v].toFixed(4), row[F.vL].toFixed(4), row[F.vR].toFixed(4),
+    // Every decision made since the previous row goes on this row (several are joined with "|"), so none is lost.
+    const newDec = s.decisions.slice(this.csvDecIdx).map((d) => d.kind).join('|');
+    this.csvDecIdx = s.decisions.length;
+    const heading = ((((b.theta * 180) / Math.PI + 180) % 360) + 360) % 360 - 180; // wrapped to -180..180
+    this.csvRows.push([s.time.toFixed(4), b.x.toFixed(4), b.y.toFixed(4), heading.toFixed(2), row[F.v].toFixed(4), row[F.vL].toFixed(4), row[F.vR].toFixed(4),
       s.dutyL.toFixed(4), s.dutyR.toFixed(4), b.vBatt.toFixed(3), ...s.sensors.raw, Number.isNaN(row[F.err]) ? '' : row[F.err].toFixed(2), Number.isNaN(row[F.pid]) ? '' : row[F.pid].toFixed(4),
-      `"${state}"`, lastDec ? lastDec.kind : ''].join(','));
+      `"${state.replace(/"/g, '""')}"`, newDec].join(','));
   }
 
   private stepOnce() {

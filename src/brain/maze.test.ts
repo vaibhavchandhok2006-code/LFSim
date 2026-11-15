@@ -60,7 +60,7 @@ describe('clean grid maze: every algorithm reaches the finish like the graph say
 
   // The test report's sweep: the outcome must not depend on speed or loop rate. At base 0.7 the default PID gains can
   // no longer hold the line (off-line moments are counted, as on a real robot) — that is a tuning limit, not tested.
-  for (const baseSpeed of [0.3, 0.5]) for (const loopHz of [100, 500, 1000]) {
+  for (const baseSpeed of [0.3, 0.5]) for (const loopHz of [100, 500, 1000, 2000]) {
     it(`left-hand outcome is stable at base ${baseSpeed}, ${loopHz} Hz`, () => {
       const s = run(t, { algorithm: 'left-hand', baseSpeed, loopHz }, 200);
       expect(s.finishTime).not.toBeNull();

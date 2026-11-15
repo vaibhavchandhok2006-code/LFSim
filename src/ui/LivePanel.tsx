@@ -71,7 +71,7 @@ interface ChartDef { title: string; series: { label: string; color: string; get:
 function Charts({ run, t, frame, windowS, channels }: { run: RunData | null; t: number; frame: number; windowS: number; channels: number }) {
   const defs: ChartDef[] = [
     { title: 'Line error (mm) and PID output', series: [
-      { label: 'Error mm', color: '#16212C', get: (r, i) => r.get(i, F.err) },
+      { label: 'Error mm', color: '#2A9DB0', get: (r, i) => r.get(i, F.err) },
       { label: 'PID', color: '#B9470F', get: (r, i) => r.get(i, F.pid), scale: 'pid' },
     ] },
     { title: 'Wheel speed (m/s) and PWM', series: [

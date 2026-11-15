@@ -1,24 +1,26 @@
 # Tasks
 
-Status: v1 (Phases 1–5) implemented and verified (34 automated tests, browser end-to-end run). Next: real-robot reality check.
+Status (15 Nov 2026): v1 implemented, and all 21 defects of the Independent Test Report addressed — 20 fixed and
+verified, D2 fixed on clean mazes with a documented limit on the dense Robo-Run sample. 77 automated tests pass;
+browser smoke test passes. Next: reality check against the real robot.
 
 ## Done (verified)
-- [x] Phase 1: robot profile, drawing, track import (Robo-Run/Custom), physics, sensors, Settings PID, run timing,
-      off-line judging, autosave, project/robot import-export, GitHub Pages workflow
-- [x] M0 Docs: CLAUDE.md, PRD.md, ARCHITECTURE.md, DECISIONS.md, TASKS.md, VALIDATION.md, docs/FIRMWARE_API.md
-- [x] M1 Mazes: junction graph + ideal path overlay; graph reference results vs spec targets; sensor-based junction
-      detection with 360° scan; left, right, straight-first, custom priority; LSRB with branch numbers + memory run;
-      Trémaux mapping + shortest path + memory run; decision log + markers
-- [x] M2 Worker and playback: simulation in a Web Worker, frame recording, playback, scrub, step; uPlot graphs
-- [x] M3 Compare and outputs: Compare tab with path overlay; CSV, PNG, WebM, GIF, HTML report, `.track.json`; validated imports
-- [x] M4 Code mode: firmware hardware API + sandbox, serial console, side-by-side view, sample firmware tests,
-      LFSim Claude skill (proposed for saving)
-- [x] M5: uneven lighting and mat folds/bumps; dark theme; validation results recorded
+- [x] Phase 1–5 (v1): robot profile, track import, physics, sensors, Settings mode + seven algorithms, worker
+      playback, graphs, Compare, exports, Code mode + sandbox, disturbances, dark theme
+- [x] Test report D3 sandbox escape; D1 no scan + shortcut judge; D4 / D20 honest finish and no auto-stop;
+      D17 brake; D5 / D16 / D19 physics; D6 odometry estimate; D7 / D8 / D9 imports; D10–D14 firmware API;
+      D15 CSV; D18 PWM frequency labelled; D21 2 kHz loop and legend colour
+- [x] D2: grid maze — every algorithm finishes like the graph; stable over base 0.3–0.5 × 100–2000 Hz
 
-## Known gaps (v1)
-- [ ] Right-hand rule loops physically on the sample map (graph-level run finishes); see VALIDATION.md
+## Known gaps
+- [ ] Robo-Run sample in Settings mode: the algorithms do not finish. 94 % of junctions are read right on straight
+      approaches, but a few dense features are misread: the 5-way junction near (0.44, 1.03) m (branches 45° apart
+      merge in a 9.6 cm-wide sensor swath), the ring with spokes, and junctions reached along a tight curve (bowl
+      exit near (0.79, 0.66) m). One wrong turn sends a wall follower round a loop.
+- [ ] Odometry drift (wheel skid in spins) is tens of cm after a minute of turns
+- [ ] Base speed 0.7 with the default PID gains loses the line (tuning, counted as off-line)
 - [ ] Firmware with an infinite loop and no `delay`/`await` is stopped by the 4 s watchdog rather than run
-- [ ] Reality check against a real robot's logs (spec: later, via the skill)
+- [ ] Reality check against a real robot's logs
 
 ## Later versions (not v1)
-- v2: track editor, auto-tuning, share links. v3: 3D view.
+- v2: track editor, auto-tuning, share links; better junction reading at dense features. v3: 3D view.

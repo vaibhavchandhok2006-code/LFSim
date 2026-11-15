@@ -26,7 +26,6 @@ export interface SettingsParams {
   maxSpeed: number;      // duty cap per wheel
   turnSpeed: number;     // duty for in-place turns and line search
   accel: number;         // max change of base speed, duty per second
-  junctionOuter: number; // outer sensors per side that must be black to call a branch
   inchMode: 'auto' | 'manual'; // auto: roll the sensor-arm length + half a line width, so the axle ends over the junction
   inchForward_cm: number;     // used when inchMode is 'manual'
   turnMethod: 'spin-until-line' | 'timed';
@@ -50,7 +49,6 @@ export const DEFAULT_SETTINGS: SettingsParams = {
   maxSpeed: 0.9,
   turnSpeed: 0.3,
   accel: 2.5,
-  junctionOuter: 2,
   inchMode: 'auto',
   inchForward_cm: 10,
   turnMethod: 'spin-until-line',
