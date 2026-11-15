@@ -140,6 +140,8 @@ function CodeForm({ code, onCode, onLoadSample }: { code: CodeSetup; onCode: (c:
       </Group>
 
       <Group title="Wiring" note="GPIO numbers exactly as your code uses them.">
+        <SelectField<'esp32' | 'avr'> label="Board" value={w.board ?? 'esp32'} onChange={(v) => setW({ board: v })}
+          options={[{ value: 'esp32', label: 'ESP32 (analogRead ≈ 10 µs, 12-bit)' }, { value: 'avr', label: 'Arduino Uno / Nano (analogRead ≈ 112 µs, 10-bit)' }]} />
         <div className="field wide-field">
           <label htmlFor="spins">Sensor pins, leftmost first</label>
           <div className="field-input"><input id="spins" key={w.sensorPins.join(',')} defaultValue={w.sensorPins.join(', ')} onBlur={(e) => setW({ sensorPins: pins(e.target.value) })} /></div>

@@ -8,7 +8,9 @@ import type { Simulation } from '../sim/simulation';
 import type { Wiring } from '../worker/protocol';
 
 const TICK = 0.001;
-const COST = { analogRead: 10e-6, digital: 0.2e-6, call: 0.5e-6, loopOverhead: 5e-6 }; // seconds of simulated CPU time
+// Seconds of simulated CPU time per call. analogRead: ESP32 ≈ 10 µs, AVR (Uno/Nano at 16 MHz, prescaler 128) ≈ 112 µs.
+const COST = { analogRead: 10e-6, analogReadAvr: 112e-6, digital: 0.2e-6, call: 0.5e-6, loopOverhead: 5e-6 };
+const ESP_OK = 0, ESP_ERR_INVALID_ARG = 0x102;
 
 export class FirmwareStop extends Error {}
 
@@ -39,8 +41,6 @@ export class FirmwareBrain implements Brain {
   private readBits: number;
   private isrs: { pin: number; fn: () => void; mode: string }[] = [];
   private lastCount = { L: 0, R: 0 };
-  private sensorCacheT = -1;
-  private sensorCache: number[] = [];
   private stoppedSince: number | null = null;
   private lineBuf = '';
   private lastLine = '';
@@ -48,8 +48,14 @@ export class FirmwareBrain implements Brain {
 
   constructor(code: string, wiring: Wiring, profile: RobotProfile) {
     this.code = code; this.wiring = wiring; this.profile = profile;
-    this.readBits = profile.sensor.adcBits;
+    this.avr = wiring.board === 'avr';
+    // The board's ADC sets the numbers the code reads: AVR is always 10-bit; ESP32 reads 12-bit by default.
+    this.readBits = this.avr ? 10 : 12;
   }
+  private avr: boolean;
+  private pcntOffset = new Map<number, number>();     // PCNT unit -> count at the last clear
+  private mcpwmSignal = new Map<string, number>();     // legacy "unit:signal" -> gpio
+  private mcpwm5: { timers: { period: number }[]; ops: { timer: number }[]; cmps: { op: number; value: number }[]; gens: { op: number; gpio: number; cmp: number | null; force: number | null }[] } = { timers: [], ops: [], cmps: [], gens: [] };
 
   attach(sim: Simulation) { this.sim = sim; }
 
@@ -155,22 +161,21 @@ export class FirmwareBrain implements Brain {
   }
 
   // ---------------- sensors ----------------
-  private sensorsNow(): number[] {
-    if (this.sensorCacheT !== this.sim.time) {
-      this.sensorCache = this.sim.sensors.read(this.sim.track, this.sim.body.x, this.sim.body.y, this.sim.body.theta, this.sim.disturb).slice();
-      this.sensorCacheT = this.sim.time;
-    }
-    return this.sensorCache;
+  private sensorRaw(i: number): number {
+    const b = this.sim.body;
+    return this.sim.sensors.readOne(i, this.sim.track, b.x, b.y, b.theta, this.sim.disturb);
   }
+  // The robot profile describes the sensor in counts of a profile.sensor.adcBits-bit ADC; the board converts with its
+  // own resolution.
   private scaleRead(v: number) {
     const shift = this.readBits - this.profile.sensor.adcBits;
     return shift >= 0 ? v << shift : v >> -shift;
   }
   private analogReadPin(pin: number): number {
-    this.cost(COST.analogRead);
+    this.cost(this.avr ? COST.analogReadAvr : COST.analogRead);
     const i = this.wiring.sensorPins.indexOf(pin);
     if (i < 0) throw new Error(`analogRead(${pin}): pin ${pin} is not a sensor pin in the wiring settings.`);
-    return this.scaleRead(this.sensorsNow()[i]);
+    return this.scaleRead(this.sensorRaw(i));
   }
 
   // ---------------- serial ----------------
@@ -197,7 +202,7 @@ export class FirmwareBrain implements Brain {
     const digitalRead = (pin: number) => {
       self.cost(COST.digital);
       const i = self.wiring.sensorPins.indexOf(pin);
-      if (i >= 0) { const v = self.sensorsNow()[i]; const s = self.profile.sensor; return (s.blackRaw >= s.whiteRaw ? v > s.threshold : v < s.threshold) ? 1 : 0; }
+      if (i >= 0) { const v = self.sensorRaw(i); const s = self.profile.sensor; return (s.blackRaw >= s.whiteRaw ? v > s.threshold : v < s.threshold) ? 1 : 0; }
       return self.pinLevel.get(pin) ?? 0;
     };
     const setPwmPin = (pin: number, duty: number, bits: number) => { self.pwmPinDuty.set(pin, Math.max(0, Math.min(1, duty / (2 ** bits - 1)))); };
@@ -205,6 +210,20 @@ export class FirmwareBrain implements Brain {
       self.cost(COST.call);
       const pin = self.ledcChannelPin.has(chOrPin) ? self.ledcChannelPin.get(chOrPin)! : chOrPin; // Arduino-ESP32 2.x uses channels, 3.x uses pins
       setPwmPin(pin, duty, self.ledcBits.get(chOrPin) ?? self.ledcBits.get(pin) ?? self.profile.pwmBits);
+    };
+    const pcntRead = (unit: number) => {
+      const c = self.counts(), raw = (unit === 0 ? c.L : c.R) - (self.pcntOffset.get(unit) ?? 0);
+      return ((raw + 32768) % 65536 + 65536) % 65536 - 32768; // int16_t wraps
+    };
+    const mcpwm5Apply = () => {
+      const m = self.mcpwm5;
+      m.gens.forEach((g) => {
+        const cmp = g.cmp ?? m.cmps.findIndex((c) => c.op === g.op);
+        const c = m.cmps[cmp];
+        const period = m.timers[m.ops[g.op]?.timer ?? 0]?.period ?? 1000;
+        const duty = g.force !== null ? g.force : c ? Math.min(1, c.value / period) : 0;
+        self.pwmPinDuty.set(g.gpio, duty);
+      });
     };
     let rnd = 12345;
     const api: Record<string, unknown> = {
@@ -216,7 +235,7 @@ export class FirmwareBrain implements Brain {
       digitalWrite, gpio_set_level: digitalWrite,
       digitalRead, gpio_get_level: digitalRead,
       analogRead: (pin: number) => self.analogReadPin(pin),
-      analogReadResolution: (bits: number) => { self.readBits = bits; },
+      analogReadResolution: (bits: number) => { if (!self.avr) self.readBits = Math.max(9, Math.min(12, Math.trunc(bits))); }, // AVR has no such call: stays 10-bit
       adc1_config_width: () => self.cost(COST.call), adc1_config_channel_atten: () => self.cost(COST.call), adc2_config_channel_atten: () => self.cost(COST.call),
       adc1_get_raw: (ch: number) => {
         const m = self.wiring.adcChannels.find((a) => a.unit === 1 && a.channel === ch);
@@ -228,6 +247,59 @@ export class FirmwareBrain implements Brain {
         if (!m) throw new Error(`adc2_get_raw(${ch}): ADC2 channel ${ch} is not mapped to a sensor in the wiring settings.`);
         const v = self.analogReadPin(m.gpio); if (out) out.value = v; return v;
       },
+      // ESP-IDF v5 one-shot ADC. ADC_UNIT_1 = 0, ADC_UNIT_2 = 1 (the wiring lists units 1 and 2).
+      ADC_UNIT_1: 0, ADC_UNIT_2: 1, ADC_ATTEN_DB_0: 0, ADC_ATTEN_DB_2_5: 1, ADC_ATTEN_DB_6: 2, ADC_ATTEN_DB_11: 3, ADC_ATTEN_DB_12: 3,
+      ADC_BITWIDTH_DEFAULT: 12, ADC_BITWIDTH_12: 12, ADC_BITWIDTH_10: 10, ADC_BITWIDTH_9: 9,
+      ADC_WIDTH_BIT_12: 12, ADC_WIDTH_BIT_10: 10, ADC_WIDTH_BIT_9: 9,
+      ...Object.fromEntries(Array.from({ length: 10 }, (_, i) => [`ADC_CHANNEL_${i}`, i])),
+      ...Object.fromEntries(Array.from({ length: 8 }, (_, i) => [`ADC1_CHANNEL_${i}`, i])),
+      ...Object.fromEntries(Array.from({ length: 10 }, (_, i) => [`ADC2_CHANNEL_${i}`, i])),
+      adc_oneshot_new_unit: (cfg: { unit_id?: number }, out: { value: unknown }) => {
+        self.cost(COST.call);
+        const unit = (cfg?.unit_id ?? 0) + 1;
+        if (unit !== 1 && unit !== 2) return ESP_ERR_INVALID_ARG;
+        out.value = { unit }; return ESP_OK;
+      },
+      adc_oneshot_config_channel: (h: { unit: number }, _ch: number, cfg?: { bitwidth?: number }) => {
+        self.cost(COST.call);
+        if (cfg?.bitwidth && cfg.bitwidth >= 9 && cfg.bitwidth <= 12) self.readBits = cfg.bitwidth;
+        return h ? ESP_OK : ESP_ERR_INVALID_ARG;
+      },
+      adc_oneshot_read: (h: { unit: number }, ch: number, out: { value: number }) => {
+        const m = self.wiring.adcChannels.find((a) => a.unit === h?.unit && a.channel === ch);
+        if (!m) throw new Error(`adc_oneshot_read(ADC${h?.unit}, channel ${ch}): not mapped to a sensor in the wiring settings.`);
+        out.value = self.analogReadPin(m.gpio); return ESP_OK;
+      },
+      adc_oneshot_del_unit: () => ESP_OK,
+      // Legacy MCPWM driver (ESP-IDF 4.x): signals MCPWM0A=0, MCPWM0B=1, MCPWM1A=2 … ; duty in percent.
+      MCPWM_UNIT_0: 0, MCPWM_UNIT_1: 1, MCPWM_TIMER_0: 0, MCPWM_TIMER_1: 1, MCPWM_TIMER_2: 2, MCPWM_OPR_A: 0, MCPWM_OPR_B: 1,
+      MCPWM0A: 0, MCPWM0B: 1, MCPWM1A: 2, MCPWM1B: 3, MCPWM2A: 4, MCPWM2B: 5, MCPWM_DUTY_MODE_0: 0, MCPWM_DUTY_MODE_1: 1, MCPWM_UP_COUNTER: 1,
+      mcpwm_gpio_init: (unit: number, signal: number, gpio: number) => { self.mcpwmSignal.set(`${unit}:${signal}`, gpio); return ESP_OK; },
+      mcpwm_init: () => ESP_OK, mcpwm_start: () => ESP_OK, mcpwm_stop: () => ESP_OK, mcpwm_set_duty_type: () => ESP_OK, mcpwm_set_frequency: () => ESP_OK,
+      mcpwm_set_duty: (unit: number, timer: number, op: number, pct: number) => {
+        self.cost(COST.call);
+        const g = self.mcpwmSignal.get(`${unit}:${timer * 2 + op}`);
+        if (g === undefined) return ESP_ERR_INVALID_ARG;
+        self.pwmPinDuty.set(g, Math.max(0, Math.min(1, Number(pct) / 100))); return ESP_OK;
+      },
+      mcpwm_set_signal_low: (unit: number, timer: number, op: number) => { const g = self.mcpwmSignal.get(`${unit}:${timer * 2 + op}`); if (g !== undefined) self.pwmPinDuty.set(g, 0); return ESP_OK; },
+      mcpwm_set_signal_high: (unit: number, timer: number, op: number) => { const g = self.mcpwmSignal.get(`${unit}:${timer * 2 + op}`); if (g !== undefined) self.pwmPinDuty.set(g, 1); return ESP_OK; },
+      // ESP-IDF v5 MCPWM (timer → operator → comparator → generator). Supported subset: up-counting timer, generator
+      // high at timer empty and low at its comparator (the usual PWM set-up); duty = compare value ÷ period ticks.
+      mcpwm_new_timer: (cfg: { period_ticks?: number }, out: { value: number }) => { self.mcpwm5.timers.push({ period: Math.max(1, cfg?.period_ticks ?? 1000) }); out.value = self.mcpwm5.timers.length - 1; return ESP_OK; },
+      mcpwm_new_operator: (_cfg: unknown, out: { value: number }) => { self.mcpwm5.ops.push({ timer: 0 }); out.value = self.mcpwm5.ops.length - 1; return ESP_OK; },
+      mcpwm_operator_connect_timer: (op: number, timer: number) => { if (self.mcpwm5.ops[op]) self.mcpwm5.ops[op].timer = timer; return ESP_OK; },
+      mcpwm_new_comparator: (op: number, _cfg: unknown, out: { value: number }) => { self.mcpwm5.cmps.push({ op, value: 0 }); out.value = self.mcpwm5.cmps.length - 1; return ESP_OK; },
+      mcpwm_new_generator: (op: number, cfg: { gen_gpio_num: number }, out: { value: number }) => { self.mcpwm5.gens.push({ op, gpio: cfg.gen_gpio_num, cmp: null, force: null }); out.value = self.mcpwm5.gens.length - 1; mcpwm5Apply(); return ESP_OK; },
+      mcpwm_generator_set_action_on_timer_event: () => ESP_OK,
+      mcpwm_generator_set_action_on_compare_event: (gen: number, ev: { comparator?: number }) => { const g = self.mcpwm5.gens[gen]; if (g && ev?.comparator !== undefined) g.cmp = ev.comparator; mcpwm5Apply(); return ESP_OK; },
+      mcpwm_generator_set_actions_on_compare_event: (gen: number, ...evs: { comparator?: number }[]) => { const g = self.mcpwm5.gens[gen]; const e = evs.find((x) => x?.comparator !== undefined); if (g && e) g.cmp = e.comparator!; mcpwm5Apply(); return ESP_OK; },
+      MCPWM_GEN_TIMER_EVENT_ACTION: (dir: number, ev: number, act: number) => ({ dir, ev, act }),
+      MCPWM_GEN_COMPARE_EVENT_ACTION: (dir: number, comparator: number, act: number) => ({ dir, comparator, act }),
+      MCPWM_TIMER_DIRECTION_UP: 0, MCPWM_TIMER_EVENT_EMPTY: 0, MCPWM_GEN_ACTION_HIGH: 2, MCPWM_GEN_ACTION_LOW: 1, MCPWM_TIMER_COUNT_MODE_UP: 0, MCPWM_TIMER_CLK_SRC_DEFAULT: 0,
+      mcpwm_timer_enable: () => ESP_OK, mcpwm_timer_start_stop: () => ESP_OK, MCPWM_TIMER_START_NO_STOP: 1,
+      mcpwm_comparator_set_compare_value: (cmp: number, ticks: number) => { self.cost(COST.call); const c = self.mcpwm5.cmps[cmp]; if (!c) return ESP_ERR_INVALID_ARG; c.value = Math.max(0, Number(ticks)); mcpwm5Apply(); return ESP_OK; },
+      mcpwm_generator_set_force_level: (gen: number, level: number) => { const g = self.mcpwm5.gens[gen]; if (!g) return ESP_ERR_INVALID_ARG; g.force = level < 0 ? null : level ? 1 : 0; mcpwm5Apply(); return ESP_OK; },
       analogWrite: (pin: number, v: number) => { self.cost(COST.call); setPwmPin(pin, v, self.analogWriteBits); },
       analogWriteResolution: (bits: number) => { self.analogWriteBits = bits; },
       ledcSetup: (ch: number, _f: number, bits: number) => { self.ledcBits.set(ch, bits); },
@@ -260,8 +332,27 @@ export class FirmwareBrain implements Brain {
       attachInterrupt: (pin: number, fn: () => void, mode: string) => { self.isrs.push({ pin, fn, mode }); self.lastCount = self.counts(); },
       digitalPinToInterrupt: (p: number) => p,
       detachInterrupt: (pin: number) => { self.isrs = self.isrs.filter((i) => i.pin !== pin); },
-      pcnt_get_counter_value: (unit: number) => { const c = self.counts(); return unit === 0 ? c.L : c.R; },
-      pcnt_counter_clear: () => {},
+      // Legacy PCNT driver: esp_err_t pcnt_get_counter_value(unit, int16_t *count). Unit 0 = left wheel, 1 = right.
+      PCNT_UNIT_0: 0, PCNT_UNIT_1: 1, ESP_OK, ESP_ERR_INVALID_ARG,
+      pcnt_unit_config: () => { self.cost(COST.call); return ESP_OK; },
+      pcnt_counter_pause: () => ESP_OK, pcnt_counter_resume: () => ESP_OK, pcnt_set_filter_value: () => ESP_OK, pcnt_filter_enable: () => ESP_OK,
+      pcnt_get_counter_value: (unit: number, out?: { value: number }) => {
+        self.cost(COST.call);
+        if (unit !== 0 && unit !== 1) return ESP_ERR_INVALID_ARG;
+        if (out) out.value = pcntRead(unit);
+        return ESP_OK;
+      },
+      pcnt_counter_clear: (unit: number) => {
+        if (unit !== 0 && unit !== 1) return ESP_ERR_INVALID_ARG;
+        const c = self.counts(); self.pcntOffset.set(unit, unit === 0 ? c.L : c.R); return ESP_OK;
+      },
+      // ESP-IDF v5 pulse counter: handles are unit numbers in creation order (first = left wheel).
+      pcnt_new_unit: (_cfg: unknown, out: { value: unknown }) => { const id = (self.pcntOffset.size ? Math.max(...self.pcntOffset.keys()) + 1 : 0); self.pcntOffset.set(id, 0); out.value = id; return ESP_OK; },
+      pcnt_new_channel: (_u: unknown, _cfg: unknown, out?: { value: unknown }) => { if (out) out.value = {}; return ESP_OK; },
+      pcnt_channel_set_edge_action: () => ESP_OK, pcnt_channel_set_level_action: () => ESP_OK, pcnt_unit_set_glitch_filter: () => ESP_OK,
+      pcnt_unit_enable: () => ESP_OK, pcnt_unit_start: () => ESP_OK, pcnt_unit_stop: () => ESP_OK,
+      pcnt_unit_clear_count: (u: number) => { const c = self.counts(); self.pcntOffset.set(u, u === 0 ? c.L : c.R); return ESP_OK; },
+      pcnt_unit_get_count: (u: number, out: { value: number }) => { self.cost(COST.call); out.value = pcntRead(u); return ESP_OK; },
       EEPROM: {
         begin: () => true, commit: () => true, length: () => 4096,
         read: (a: number) => mem().eeprom[a] ?? 255, write: (a: number, v: number) => { mem().eeprom[a] = v & 255; }, update: (a: number, v: number) => { mem().eeprom[a] = v & 255; },
@@ -279,7 +370,12 @@ export class FirmwareBrain implements Brain {
       nvs_get_i32: (k: string, out: { value: number }) => { const v = mem().prefs[k]; if (v === undefined) return 1; out.value = v as number; return 0; },
       nvs_set_i32: (k: string, v: number) => { mem().prefs[k] = v; return 0; },
       constrain: (x: number, a: number, b: number) => Math.min(b, Math.max(a, x)),
-      map: (x: number, a: number, b: number, c: number, d: number) => Math.trunc(((x - a) * (d - c)) / (b - a) + c),
+      // Arduino map(): long integer maths — the product is divided with truncation toward zero, then out_min added.
+      map: (x: number, a: number, b: number, c: number, d: number) => {
+        const [X, A, B, C, D] = [x, a, b, c, d].map(Math.trunc);
+        if (B === A) throw new Error('map(): in_min equals in_max (division by zero).');
+        return Math.trunc(((X - A) * (D - C)) / (B - A)) + C;
+      },
       random: (a: number, b?: number) => { rnd = (rnd * 1103515245 + 12345) & 0x7fffffff; const lo = b === undefined ? 0 : a, hi = b === undefined ? a : b; return lo + (rnd % Math.max(1, hi - lo)); },
       randomSeed: (s: number) => { rnd = s | 0; },
     };

@@ -69,25 +69,29 @@ export class SensorArray {
   // disturb(px, py): disturbance at a floor point — extra sensor height from a mat bump (mm) and an ambient-light
   // shift in raw ADC counts. Undefined = clean conditions.
   read(t: Track, x: number, y: number, theta: number, disturb?: Disturb): number[] {
+    for (let i = 0; i < this.n; i += 1) this.raw[i] = this.readOne(i, t, x, y, theta, disturb);
+    return this.raw;
+  }
+
+  // One channel, with its own noise sample — as one ADC conversion on a real board (each analogRead is a fresh
+  // conversion with fresh noise, even within the same millisecond).
+  readOne(i: number, t: Track, x: number, y: number, theta: number, disturb?: Disturb): number {
     const s = this.p.sensor;
     const mid = (s.whiteRaw + s.blackRaw) / 2;
     const sigma = ((Math.abs(s.blackRaw - s.whiteRaw) * s.noise_pct) / 100);
-    for (let i = 0; i < this.n; i += 1) {
-      const [px, py] = this.position(i, x, y, theta);
-      const d = disturb ? disturb(px, py) : NO_DISTURB;
-      const k = contrastFactor(s.height_mm + d.dh_mm);
-      const half = ((s.blackRaw - s.whiteRaw) / 2) * k;
-      const ambientShift = d.amb;
-      // a raised sensor also sees a wider spot
-      const grow = d.dh_mm > 0 ? (spotDiameter_mm({ ...s, spot_mm: 0, height_mm: s.height_mm + d.dh_mm }) / spotDiameter_mm({ ...s, spot_mm: 0 })) : 1;
-      let cov = 0;
-      for (const [dx, dy, w] of this.spot) cov += w * darkAt(t, px + dx * grow, py + dy * grow);
-      this.coverage[i] = cov;
-      const g = this.flags.mismatch ? this.gains[i] : 1;
-      let v = mid + half * g * (2 * cov - 1) + ambientShift;
-      if (this.flags.noise) v += sigma * this.rng.gauss();
-      this.raw[i] = Math.round(Math.max(0, Math.min(this.maxRaw, v)));
-    }
-    return this.raw;
+    const [px, py] = this.position(i, x, y, theta);
+    const d = disturb ? disturb(px, py) : NO_DISTURB;
+    const k = contrastFactor(s.height_mm + d.dh_mm);
+    const half = ((s.blackRaw - s.whiteRaw) / 2) * k;
+    const ambientShift = d.amb;
+    // a raised sensor also sees a wider spot
+    const grow = d.dh_mm > 0 ? (spotDiameter_mm({ ...s, spot_mm: 0, height_mm: s.height_mm + d.dh_mm }) / spotDiameter_mm({ ...s, spot_mm: 0 })) : 1;
+    let cov = 0;
+    for (const [dx, dy, w] of this.spot) cov += w * darkAt(t, px + dx * grow, py + dy * grow);
+    this.coverage[i] = cov;
+    const g = this.flags.mismatch ? this.gains[i] : 1;
+    let v = mid + half * g * (2 * cov - 1) + ambientShift;
+    if (this.flags.noise) v += sigma * this.rng.gauss();
+    return Math.round(Math.max(0, Math.min(this.maxRaw, v)));
   }
 }

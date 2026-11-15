@@ -211,7 +211,10 @@ export function parseImport(text: string): Imported {
     if (isObj(firmware)) {
       code = {};
       for (const k of ['source', 'sourceLang', 'translated', 'notes'] as const) if (typeof firmware[k] === 'string') code[k] = firmware[k] as string;
-      if (isObj(firmware.wiring)) code.wiring = merge(SAMPLE_WIRING, firmware.wiring);
+      if (isObj(firmware.wiring)) {
+        code.wiring = merge(SAMPLE_WIRING, firmware.wiring);
+        if (code.wiring.board !== undefined && code.wiring.board !== 'esp32' && code.wiring.board !== 'avr') throw new Error(`The robot file's board must be "esp32" or "avr" (got ${String(code.wiring.board)}).`);
+      }
     }
     return { kind: 'robot', value, code };
   }

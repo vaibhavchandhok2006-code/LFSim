@@ -20,6 +20,9 @@ export interface Wiring {
     leftInvert: boolean; rightInvert: boolean;
   };
   encoders: { leftA: number; leftB: number; rightA: number; rightB: number } | null;
+  // Board: sets analogRead timing and resolution. ESP32: ~10 µs, 12-bit (analogReadResolution can change it).
+  // AVR (Arduino Uno/Nano): ~112 µs per analogRead, always 10-bit. Optional for older files (default ESP32).
+  board?: 'esp32' | 'avr';
 }
 
 export interface StartMsg {
