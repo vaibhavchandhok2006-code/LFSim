@@ -21,8 +21,9 @@ export interface MotorProfile {
   noLoadRpm: number;         // output-shaft rpm at rated voltage, no load
   stallTorque_kgcm: number;  // output-shaft stall torque at rated voltage
   stallCurrent_A: number;    // stall current at rated voltage
-  gearRatio: number;         // informational; encoder CPR below is per wheel revolution
+  gearRatio: number;         // sets the reflected rotor inertia (acceleration, braking); encoder CPR is per wheel revolution
   mismatch_pct: number;      // how much weaker the right motor is than the left
+  stictionFactor?: number;   // static (breakaway) friction ÷ running friction in the gearbox; estimate 2.5 → a small dead band
 }
 
 export interface RobotProfile {
@@ -83,6 +84,7 @@ export const DEFAULT_PROFILE: RobotProfile = {
     stallCurrent_A: 1.6,
     gearRatio: 50,
     mismatch_pct: 3,
+    stictionFactor: 2.5,
   },
   driver: 'TB6612FNG',
   pwmFreq_Hz: 20000,

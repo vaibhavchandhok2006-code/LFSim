@@ -50,16 +50,28 @@ export class Swath {
     // 1. Paint the map: each reading covers the strip between it and its neighbouring sensors (across the direction of
     //    travel only, so lines are not widened along it). Each cell holds the average of the readings over it
     //    (-1 = never seen), so a dark reading next to white ones does not widen the line.
+    //    At a slow loop rate or high speed the readings of one sensor are several mm apart along the travel, so each
+    //    reading also covers half the distance to the next one (at most 6 mm) along the travel.
     const sum = new Float32Array(N * N), cntA = new Uint16Array(N * N);
-    for (let i = this.start; i < this.xs.length; i += 1) {
+    const L = this.xs.length;
+    const gapAfter = new Float32Array(L);
+    for (let i = L - 1, nextOdo = NaN, curOdo = NaN, gap = 0; i >= this.start; i -= 1) {
+      if (this.odo[i] !== curOdo) { if (!Number.isNaN(curOdo)) nextOdo = curOdo; curOdo = this.odo[i]; gap = Number.isNaN(nextOdo) ? 0 : Math.abs(nextOdo - curOdo); }
+      gapAfter[i] = gap;
+    }
+    for (let i = this.start; i < L; i += 1) {
       const px = this.xs[i] - cx + HALF, py = this.ys[i] - cy + HALF;
-      if (px < -paint_m || py < -paint_m || px > 2 * HALF + paint_m || py > 2 * HALF + paint_m) continue;
-      const d = this.ds[i], nx = -Math.sin(this.hs[i]), ny = Math.cos(this.hs[i]);
-      for (let t = -paint_m; t <= paint_m + 1e-9; t += CELL / 2) {
-        const gx = Math.round((px + t * nx) / CELL), gy = Math.round((py + t * ny) / CELL);
-        if (gx < 0 || gy < 0 || gx >= N || gy >= N) continue;
-        const k = gy * N + gx;
-        sum[k] += d; if (cntA[k] < 65535) cntA[k] += 1;
+      if (px < -paint_m - 0.01 || py < -paint_m - 0.01 || px > 2 * HALF + paint_m + 0.01 || py > 2 * HALF + paint_m + 0.01) continue;
+      const d = this.ds[i], hx = Math.cos(this.hs[i]), hy = Math.sin(this.hs[i]), nx = -hy, ny = hx;
+      const along = Math.min(0.006, gapAfter[i] / 2);
+      for (let a = 0; a <= along + 1e-9; a += CELL / 2) {
+        for (let t = -paint_m; t <= paint_m + 1e-9; t += CELL / 2) {
+          const gx = Math.round((px + t * nx + a * hx) / CELL), gy = Math.round((py + t * ny + a * hy) / CELL);
+          if (gx < 0 || gy < 0 || gx >= N || gy >= N) continue;
+          const k = gy * N + gx;
+          sum[k] += d; if (cntA[k] < 65535) cntA[k] += 1;
+        }
+        if (along < CELL / 2) break;
       }
     }
     const map = new Float32Array(N * N);
@@ -158,7 +170,10 @@ export class Swath {
       const blocked = (k: number) => {
         const x = (k % N - fx) * CELL, y = (Math.floor(k / N) - fy) * CELL;
         const la = -x * ls + y * lc;
-        return x * lc + y * ls < -0.022 && la > Math.min(-0.022, cLo) && la < Math.max(0.022, cHi);
+        const al = x * lc + y * ls;
+        // Everything more than 5.5 cm behind the centre is where the robot came from (a real branch leaving at up to
+        // 135° has left the swath before that); this also keeps a start square just behind a junction out.
+        return al < -0.055 || (al < -0.022 && la > Math.min(-0.022, cLo) && la < Math.max(0.022, cHi));
       };
       if (start >= 0) {
         const st = [start]; conn2[start] = 1;
@@ -198,7 +213,7 @@ export class Swath {
       let x0 = 1e9, x1 = -1e9, y0 = 1e9, y1 = -1e9; for (let i = this.start; i < this.xs.length; i += 1) { x0 = Math.min(x0, this.xs[i] - cx); x1 = Math.max(x1, this.xs[i] - cx); y0 = Math.min(y0, this.ys[i] - cy); y1 = Math.max(y1, this.ys[i] - cy); }
       dbg('h=' + ((heading * 180) / Math.PI).toFixed(0) + ` samples ${this.xs.length - this.start} x ${x0.toFixed(3)}..${x1.toFixed(3)} y ${y0.toFixed(3)}..${y1.toFixed(3)}\n` + rows.join('\n'));
     }
-    // Group the edge cells: cells along the edge that touch (a one-cell gap allowed, the swath edge is ragged) are
+    // Group the edge cells: cells along the edge that touch (a two-cell gap allowed, the swath edge is ragged) are
     // one line leaving. Each line's direction is the axis of its dark cells between the centre and the edge.
     const MIN_DIST = 0.03; // edge cells closer than this to the centre belong to the junction itself
     const lc2 = Math.cos(lineDir), ls2 = Math.sin(lineDir);
@@ -211,7 +226,7 @@ export class Swath {
       const id = comps.length, cells: number[] = [k]; compOf[k] = id;
       for (let q = 0; q < cells.length; q += 1) {
         const x = cells[q] % N, y = (cells[q] - x) / N;
-        for (let dy = -2; dy <= 2; dy += 1) for (let dx = -2; dx <= 2; dx += 1) {
+        for (let dy = -3; dy <= 3; dy += 1) for (let dx = -3; dx <= 3; dx += 1) {
           const xx = x + dx, yy = y + dy; if (xx < 0 || yy < 0 || xx >= N || yy >= N) continue;
           const kk = yy * N + xx;
           if (!frontier[kk] || compOf[kk] >= 0) continue;

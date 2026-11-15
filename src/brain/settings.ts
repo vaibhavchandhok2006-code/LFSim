@@ -273,7 +273,10 @@ export class SettingsBrain implements Brain {
     const spacing = Math.abs(io.lateral_mm[0] - io.lateral_mm[1]);
     const black = on.filter(Boolean).length;
     const single = black >= 1 && black <= Math.ceil(38 / Math.max(1, spacing)) && !on[0] && !on[on.length - 1];
-    const s = Math.max(0.2, this.speed * 0.7);
+    // Slow down over the last few cm so the robot stops on the centre instead of rolling past it (matters at a slow
+    // loop rate or a high base speed).
+    const remaining = Math.max(0, dx * Math.cos(this.yaw) + dy * Math.sin(this.yaw));
+    const s = auto ? Math.min(Math.max(0.2, this.speed * 0.7), 0.14 + 3 * remaining) : Math.max(0.2, this.speed * 0.7);
     let c: number;
     let pos = 0;
     if (sum > 0.3) { for (let i = 0; i < n.length; i += 1) pos += n[i] * io.lateral_mm[i]; pos /= sum; }

@@ -57,7 +57,7 @@ export class RuleNavigator implements Navigator {
 // robot originally arrived, that junction was itself a dead-end subtree and is cancelled too.
 // Run 2 replays the stored branch numbers.
 
-interface LsrbEntry { n: number; rank: number; rel: number; arr: number; branchesAbs: number[] }
+interface LsrbEntry { n: number; rank: number; rel: number; branchesRel: number[] }
 interface LsrbMemory { entries: LsrbEntry[]; complete: boolean }
 
 export class LsrbNavigator implements Navigator {
@@ -78,31 +78,30 @@ export class LsrbNavigator implements Navigator {
       j.branches.forEach((a, i) => { if (Math.abs(wrap(a - e.rel)) < Math.abs(wrap(j.branches[bi] - e.rel))) bi = i; });
       return pick(j, bi, `replay #${this.replayIdx}: saw ${j.branches.length} branches, expected ${e.n}; nearest angle`);
     }
-    // Run 1: explore with the left-hand rule and reduce on the fly
+    // Run 1: explore with the left-hand rule and reduce on the fly. Only turn angles measured at the junctions are
+    // used (no absolute heading), so odometry drift cannot spoil the reduction: coming back out of a dead end into the
+    // junction left by branch `rel`, the robot arrives facing rel + 180°, so its new choice c is, relative to the
+    // original arrival, rel + 180° + c.
     const c = leftmost(j);
-    const chosenAbs = j.arrivalYaw_deg + c.angle;
     if (!j.branches.length) { this.stack.push('DEAD'); return c; }
-    let top = this.stack[this.stack.length - 1];
+    const top = this.stack[this.stack.length - 1];
     if (top === 'DEAD') {
       this.stack.pop();
-      let p = this.stack[this.stack.length - 1];
-      // Unwind: the junction we return to is the top entry; its choice is replaced by the new heading.
-      while (p && p !== 'DEAD') {
-        const headsBack = Math.abs(wrap(chosenAbs - (p.arr + 180))) < 30;
-        if (!headsBack) {
-          const rel = wrap(chosenAbs - p.arr);
+      const p = this.stack[this.stack.length - 1];
+      if (p && p !== 'DEAD') {
+        const relNew = wrap(p.rel + 180 + c.angle);
+        if (Math.abs(wrap(relNew - 180)) >= 40) {
           let r = 0;
-          p.branchesAbs.forEach((a, i) => { if (Math.abs(wrap(a - chosenAbs)) < Math.abs(wrap(p.branchesAbs[r] - chosenAbs))) r = i; });
-          (p as LsrbEntry).rank = r; (p as LsrbEntry).rel = rel;
+          p.branchesRel.forEach((a, i) => { if (Math.abs(wrap(a - relNew)) < Math.abs(wrap(p.branchesRel[r] - relNew))) r = i; });
+          p.rank = r; p.rel = p.branchesRel[r];
           return { ...c, note: `left-hand; replaces the dead-end choice at this junction with branch ${r + 1} of ${p.n}` };
         }
         this.stack.pop(); // this junction led only to dead ends
         this.stack.push('DEAD');
         return { ...c, note: 'left-hand; junction leads only to dead ends, cancelled' };
       }
-      top = undefined as never;
     }
-    this.stack.push({ n: j.branches.length, rank: c.rank ?? 0, rel: c.angle, arr: j.arrivalYaw_deg, branchesAbs: j.branches.map((a) => j.arrivalYaw_deg + a) });
+    this.stack.push({ n: j.branches.length, rank: c.rank ?? 0, rel: c.angle, branchesRel: j.branches.slice() });
     return c;
   }
   finished(_j: unknown, memory: Record<string, unknown>): void {
