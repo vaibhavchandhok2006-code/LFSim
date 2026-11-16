@@ -1,4 +1,4 @@
-# LFSim — handoff (15 Nov 2026, evening)
+# LFSim — handoff (16 Nov 2026)
 
 Live app: https://vaibhavchandhok2006-code.github.io/LFSim/ · Spec: `docs/LFSim_Spec_v1.pdf` (then PRD.md, DECISIONS.md).
 
@@ -6,7 +6,11 @@ Live app: https://vaibhavchandhok2006-code.github.io/LFSim/ · Spec: `docs/LFSim
 - v1 (Phases 1–5) done.
 - **Independent Test Report: all 21 defects addressed.** 20 fixed and verified; D2 fixed on clean mazes, with a
   documented limit on the dense Robo-Run sample (below). 77 automated tests and the browser smoke test pass.
-- Next phase: reality check against the real robot (RMI test rig), then v2 (track editor, auto-tuning, share links).
+- **LFSim Lab** (spec: `docs/lab/SPEC.md`): Phase 0 done 2026-11-16 — headless command line identical to the website,
+  Windows laptop set up and checked (`npm run lab -- doctor` all OK). Next: Phase 1 (competition profile, track
+  generator, photo import, 10-minute session benchmark, what-if report). Shaastra reference images: 2024, 2025, 2026
+  (3–4 images, to be sent).
+- Reality check against the real robot when it is free (LFSim Lab Phase 3).
 
 ## What changed for the test report
 | Defect | Fix |

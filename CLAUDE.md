@@ -27,6 +27,11 @@ Source of truth: `docs/LFSim_Spec_v1.pdf` (spec v1, 14 Nov 2026), then `PRD.md`,
 - No backend, no network calls, no analytics.
 - Imported files are untrusted: validate schema version, types, ranges and sizes.
 
+## Documentation (keep current, the repo will be public)
+- Every phase or feature updates: `docs/learn/` (a short plain-language page on what was built and the ideas behind it),
+  `TASKS.md`, `VALIDATION.md`, `DECISIONS.md`, `HANDOFF.md`, and the relevant README or setup guide.
+- `docs/README.md` indexes all documents; `docs/lab/SPEC.md` is the repo copy of the LFSim Lab spec.
+
 ## Safety
 - Never force-push or rewrite history. Commit focused checkpoints.
 - Firmware code runs only in the sandbox worker, never on the main thread.

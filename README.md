@@ -51,3 +51,14 @@ The site deploys to GitHub Pages from `main` through `.github/workflows/deploy.y
 ## Licence
 
 MIT
+
+## LFSim Lab
+
+A command-line companion that tests robot designs on many tracks without a browser, on the way to an optimiser and AI
+agents that design a Robo-Run robot. Status: Phase 0 done. See [lab/README.md](lab/README.md) and the
+[LFSim Lab spec](docs/lab/SPEC.md).
+
+## Documentation
+
+All documents are listed in [docs/README.md](docs/README.md), including a [learning log](docs/learn/README.md) that
+explains how each part is built.
