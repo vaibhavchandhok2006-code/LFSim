@@ -99,3 +99,15 @@ selector shown; a robot file with stall current 0 is refused; dark theme legend 
 ## Browser end-to-end (headless Chromium, production build) — passed 2026-11-14
 Run, scrub, LSRB memory run (117.54 s → 105.44 s), Compare overlay, Code mode sample (console "Ready", "Finish!"),
 CSV / PNG / HTML report / GIF (2.0 MB) downloads, dark theme. No page or worker errors.
+
+## LFSim Lab Phase 0 — passed 2026-11-16
+| Check | Expected | Result |
+| --- | --- | --- |
+| Website vs command line, Settings mode (left-hand, sample track, ~8.6 s) — e2e/headless_match.py | identical CSV rows | pass (4,308 rows identical) |
+| Website vs command line, Code mode (sample firmware, ~9.2 s) | identical CSV rows | pass (4,616 rows identical) after printing near-zero values without a minus sign; before that only the sign of a stopped robot's speed (about 1e-17 m/s) differed |
+| Same run in chunks of 0.37 s, 2 s, 8 s (lab/src/headless.test.ts) | identical CSV | pass |
+| Project file vs the same settings given as options | identical CSV | pass |
+| Bad input: JPEG, no track, unknown option, bad algorithm, 9999 s, robot with mass 0 | clear error | pass |
+| `npm run lab -- doctor` on Linux | all four OK | pass (Node 22.23, Git 2.43, GCC 13.3, Claude Code 2.1) |
+| Speed (one core, sample track, 30 s run incl. track import) | measured | 14× real time; most of a short run is the one-off track import and junction graph (to be cached in Phase 1) |
+| Windows setup guide | followed on a Windows laptop | **not yet run** — needs your laptop |

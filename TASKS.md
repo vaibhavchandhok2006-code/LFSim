@@ -1,6 +1,6 @@
 # Tasks
 
-Status (15 Nov 2026): v1 implemented, and all 21 defects of the Independent Test Report addressed — 20 fixed and
+Status (16 Nov 2026): LFSim Lab Phase 0 done. Earlier (15 Nov 2026): v1 implemented, and all 21 defects of the Independent Test Report addressed — 20 fixed and
 verified, D2 fixed on clean mazes with a documented limit on the dense Robo-Run sample. 77 automated tests pass;
 browser smoke test passes. Next: reality check against the real robot.
 
@@ -21,6 +21,13 @@ browser smoke test passes. Next: reality check against the real robot.
 - [ ] Base speed 0.7 with the default PID gains loses the line (tuning, counted as off-line)
 - [ ] Firmware with an infinite loop and no `delay`/`await` is stopped by the 4 s watchdog rather than run
 - [ ] Reality check against a real robot's logs
+
+## LFSim Lab (spec: LFSim Lab — Spec v1)
+- [x] Phase 0: command line (`npm run lab`), headless runs identical to the website, setup doctor, Windows setup guide,
+      CI on Linux (pull requests and branches)
+- [ ] Phase 1: competition profile, track generator, photo import, track sets, 10-minute session benchmark, what-if report
+      (note: cache the track import and junction graph per track — they take most of a short run's time)
+- [ ] Phase 2–8: see the spec
 
 ## Later versions (not v1)
 - v2: track editor, auto-tuning, share links; better junction reading at dense features. v3: 3D view.

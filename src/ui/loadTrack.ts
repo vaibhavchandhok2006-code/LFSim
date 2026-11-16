@@ -1,12 +1,8 @@
-import { processTrack, rgbaToGray, startPoseFor } from '../track/importTrack';
-import { PRESETS, Track, TrackPreset } from '../track/track';
+import { Track } from '../track/track';
 import { RobotProfile } from '../sim/profile';
 import { TrackSetup } from './persist';
-
-export function presetFor(setup: TrackSetup): TrackPreset {
-  if (setup.presetId === 'roborun') return PRESETS[0];
-  return { ...PRESETS[1], ...setup.custom };
-}
+import { buildTrackFromRgba } from '../track/buildTrack';
+export { presetFor } from '../track/buildTrack';
 
 export async function buildTrack(image: Blob, setup: TrackSetup, profile: RobotProfile): Promise<{ track: Track; messages: string[]; size: { w: number; h: number } }> {
   const bmp = await createImageBitmap(image);
@@ -17,22 +13,8 @@ export async function buildTrack(image: Blob, setup: TrackSetup, profile: RobotP
   ctx.fillRect(0, 0, c.width, c.height);
   ctx.drawImage(bmp, 0, 0);
   const data = ctx.getImageData(0, 0, c.width, c.height).data;
-  const gray = rgbaToGray(data);
-  const cr = setup.crop ?? { left_pct: 0, top_pct: 0, right_pct: 0, bottom_pct: 0 };
-  const clampPct = (v: number) => Math.max(0, Math.min(45, Number.isFinite(v) ? v : 0));
-  const x0 = Math.round((c.width * clampPct(cr.left_pct)) / 100), x1 = Math.round(c.width * (1 - clampPct(cr.right_pct) / 100));
-  const y0 = Math.round((c.height * clampPct(cr.top_pct)) / 100), y1 = Math.round(c.height * (1 - clampPct(cr.bottom_pct) / 100));
-  const cropped = x0 > 0 || y0 > 0 || x1 < c.width || y1 < c.height;
-  const { track, report } = processTrack(gray, c.width, c.height, presetFor(setup), {
-    crop: cropped ? { x0, y0, x1, y1 } : undefined,
-    normaliseWidth: setup.normaliseWidth,
-    imageName: setup.imageName,
-  });
-  if (setup.swapStartFinish && track.finish) {
-    const s = track.start; track.start = track.finish; track.finish = s;
-  }
-  track.startPose = setup.poseOverride ?? startPoseFor(track, profile.axleFromFront_mm / 1000);
-  return { track, messages: report.messages, size: { w: c.width, h: c.height } };
+  const { track, messages } = buildTrackFromRgba(data, c.width, c.height, setup, profile);
+  return { track, messages, size: { w: c.width, h: c.height } };
 }
 
 // Render the darkness map into a canvas once; the viewport scales it.

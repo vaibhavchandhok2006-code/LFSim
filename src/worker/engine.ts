@@ -62,8 +62,11 @@ export class Engine {
     const newDec = s.decisions.slice(this.csvDecIdx).map((d) => d.kind).join('|');
     this.csvDecIdx = s.decisions.length;
     const heading = ((((b.theta * 180) / Math.PI + 180) % 360) + 360) % 360 - 180; // wrapped to -180..180
-    this.csvRows.push([s.time.toFixed(4), b.x.toFixed(4), b.y.toFixed(4), heading.toFixed(2), row[F.v].toFixed(4), row[F.vL].toFixed(4), row[F.vR].toFixed(4),
-      s.dutyL.toFixed(4), s.dutyR.toFixed(4), b.vBatt.toFixed(3), ...s.sensors.raw, Number.isNaN(row[F.err]) ? '' : row[F.err].toFixed(2), Number.isNaN(row[F.pid]) ? '' : row[F.pid].toFixed(4),
+    // Fixed decimals, and never "-0.0000": a value that rounds to zero prints as zero whatever its sign. (Browsers and
+    // Node can differ in the last bit of a tiny residual such as the speed of a stopped robot.)
+    const fx = (v: number, d: number) => { const t = v.toFixed(d); return /^-0\.?0*$/.test(t) ? t.slice(1) : t; };
+    this.csvRows.push([fx(s.time, 4), fx(b.x, 4), fx(b.y, 4), fx(heading, 2), fx(row[F.v], 4), fx(row[F.vL], 4), fx(row[F.vR], 4),
+      fx(s.dutyL, 4), fx(s.dutyR, 4), fx(b.vBatt, 3), ...s.sensors.raw, Number.isNaN(row[F.err]) ? '' : fx(row[F.err], 2), Number.isNaN(row[F.pid]) ? '' : fx(row[F.pid], 4),
       `"${state.replace(/"/g, '""')}"`, newDec].join(','));
   }
 

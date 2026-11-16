@@ -32,3 +32,7 @@
 | 2026-11-15 | LSRB path reduction uses only turn angles measured at each junction, not odometry heading | Heading drift spoiled the reduction on long runs |
 | 2026-11-15 | Algorithm tests use a clean generated grid maze (`loadGridMaze`) for exact comparisons with the graph; the Robo-Run sample is used for honesty checks | Exact reference behaviour needs junctions the robot can read unambiguously |
 | 2026-11-15 | All-black within 60 cm of the start (odometry) is the start square, not the finish; finish needs 10 cm of all-black (was 7) | Big multi-way junctions are several cm of black; the start square was taken for the finish |
+| 2026-11-16 | LFSim Lab lives in `lab/` and runs the website's own simulation Engine in Node through `tsx` (new dev dependency) | Spec: one simulator, same results; tsx runs the existing TypeScript without a separate build |
+| 2026-11-16 | Track building moved to `src/track/buildTrack.ts`, used by both the website (canvas decode) and the command line (pngjs decode) | Both must build the same track from the same pixels |
+| 2026-11-16 | Command line accepts PNG track images only | Browsers and Node libraries decode JPEG/WebP slightly differently, so only PNG gives identical tracks |
+| 2026-11-16 | CSV never prints "-0.0000"; a value that rounds to zero prints as zero | Chrome and Node differ in the last bit of tiny residuals (a stopped robot's speed); every printed number now matches |

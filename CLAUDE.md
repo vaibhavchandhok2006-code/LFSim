@@ -6,6 +6,8 @@ Source of truth: `docs/LFSim_Spec_v1.pdf` (spec v1, 14 Nov 2026), then `PRD.md`,
 - `npm run dev` — dev server
 - `npm test` — Vitest (physics, sensors, track import, graph, algorithms, code mode)
 - `npm run build` — type-check + production build to `dist/`
+- `npm run lab -- run|doctor|help` — LFSim Lab command line (`lab/`); `npm run typecheck:lab` type-checks it
+- LFSim Lab spec: https://claude.ai/artifact/7noPMWNsUYry7sCm8jCajX (Phases 0–8); Lab code lives in `lab/` and reuses `src/`
 - Deploy: push to `main`; GitHub Actions builds and publishes to GitHub Pages.
 
 ## Architecture boundaries (do not break)
