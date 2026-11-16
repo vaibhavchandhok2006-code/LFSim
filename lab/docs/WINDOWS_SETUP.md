@@ -21,6 +21,19 @@ irm https://claude.ai/install.ps1 | iex
 | MSYS2 | Gives you the GCC C compiler, so your real firmware can run in the simulator (Phase 2) |
 | Claude Code | The AI agents (Phase 5) and building LFSim with me on your laptop |
 
+If PowerShell then says **`claude` is not recognized**, the installer could not add its folder to PATH. Run this,
+then close and reopen PowerShell:
+
+```powershell
+[Environment]::SetEnvironmentVariable("Path", [Environment]::GetEnvironmentVariable("Path", "User") + ";$HOME\.local\bin", "User")
+```
+
+If **`npm` cannot be loaded because running scripts is disabled**, allow scripts for your user only (answer Y):
+
+```powershell
+Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned
+```
+
 ## 2. Set up the C compiler (MSYS2)
 
 1. Open **MSYS2 UCRT64** from the Start menu (a black terminal).
@@ -31,7 +44,8 @@ irm https://claude.ai/install.ps1 | iex
 
 ## 3. Sign in to Claude Code
 
-In PowerShell run `claude`. Choose to sign in with your Claude account (your Pro plan) and finish in the browser.
+Run `claude` only inside the LFSim folder (step 4), not in your home folder: when it asks whether you trust the
+folder, say yes only for `Documents\LFSim`. Choose to sign in with your Claude account (your Pro plan) and finish in the browser.
 Type `/exit` to leave. `claude --version` should now print a version.
 
 ## 4. Get LFSim and check everything

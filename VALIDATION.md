@@ -110,4 +110,4 @@ CSV / PNG / HTML report / GIF (2.0 MB) downloads, dark theme. No page or worker 
 | Bad input: JPEG, no track, unknown option, bad algorithm, 9999 s, robot with mass 0 | clear error | pass |
 | `npm run lab -- doctor` on Linux | all four OK | pass (Node 22.23, Git 2.43, GCC 13.3, Claude Code 2.1) |
 | Speed (one core, sample track, 30 s run incl. track import) | measured | 14× real time; most of a short run is the one-off track import and junction graph (to be cached in Phase 1) |
-| Windows setup guide | followed on a Windows laptop | **not yet run** — needs your laptop |
+| Windows setup guide (2026-11-16, your HP laptop) | doctor all OK | pass (Node 26.13, Git 2.56, MSYS2 GCC 16.2, Claude Code 2.1.325); fixes needed on the way: add C:\Users\<you>\.local\bin to PATH after the Claude installer, and allow scripts with Set-ExecutionPolicy -Scope CurrentUser RemoteSigned |
