@@ -152,3 +152,12 @@ CSV / PNG / HTML report / GIF (2.0 MB) downloads, dark theme. No page or worker 
 | Average per maze vs the sample maze (sample in brackets) | similar or a little more | zigzag 1.3 (1), half-circle bump 1.4 (1), rectangles 4.4 (≈ 8; the photos show 3–6), comb 1.0 (1), circles 0.9 (2; photos 0–3), diamond/V 0.5 (1), triangle chain 0.3 (1), meander 0.1 (1), S-bend 0.2 (1), oval 0.1 (0–1 on photos), stubs 2.9, diagonals 2.4 (≈ 6), rounded corners 2.0. Junctions median 31 (10–90 %: 23–38), dead ends 11, loops 10, line length 30 m (sample 32 m). Long features (meander, S-bend, triangles) are often dropped when they would touch another line |
 | Sample tracks look like Shaastra mazes | your review | **pending** |
 | What-if, RMI test rig, Trémaux, 300 s dry run, 40 held-out tracks × 3 variations | report | 3.3 % of sessions finish (95 % interval 1.3–8.3 %) |
+
+## Track sets as variations of the real maze (generator v4) — 2026-11-19
+| Check | Expected | Result |
+| --- | --- | --- |
+| The real Shaastra sample against the rule checker | passes (it is a real maze) | failed the old hidden-finish rule (left-hand 1.20 ×, right-hand 1.31 × the shortest route) → rule recalibrated; now passes |
+| Variations reproducible; easy / normal / hard all pass the rule checks on the 4 m mat (test, 10 seeds) | pass | pass |
+| Set rr-2027 v4: 500 variations (149 easy, 198 normal, 153 hard) | all pass | 500 / 500 in 383 s on 2 workers. Median junctions: easy 58, normal 62, hard 64 (sample 59); dead ends: easy 6, normal 12, hard 12 (sample 12) |
+| Variations look like the Shaastra maze | your review | **pending** |
+| What-if, RMI test rig, Trémaux, 300 s dry run, 40 held-out variations × 3 | report | 0 of 120 sessions finish (95 % interval 0–3.1 %). 773 runs aborted by re-entering the start square: on this maze's layout the exploration keeps coming back into the start square. Main target for Phase 5 (algorithm) |
