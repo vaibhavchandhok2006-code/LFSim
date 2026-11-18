@@ -43,6 +43,7 @@ export interface SessionResult {
   restarts: number;
   sessionUsed_s: number;
   closestToFinish_m: number;           // tie-break for robots that never finish (rulebook)
+  memory: Record<string, unknown>;     // the robot's memory at the end (its route, once found)
 }
 
 export interface SessionOptions {
@@ -154,5 +155,6 @@ export async function runSession(o: SessionOptions): Promise<SessionResult> {
     runs, restarts,
     sessionUsed_s: +Math.min(c.session.access_s, clock).toFixed(3),
     closestToFinish_m: +(best ? 0 : closest).toFixed(3),
+    memory,
   };
 }

@@ -36,10 +36,20 @@ export function darkAt(t: Track, xm: number, ym: number): number {
   const fx = xm / t.res - 0.5, fy = ym / t.res - 0.5;
   const x0 = Math.floor(fx), y0 = Math.floor(fy);
   const ax = fx - x0, ay = fy - y0;
-  const g = (x: number, y: number) => (x < 0 || y < 0 || x >= t.w || y >= t.h ? 0 : t.dark[y * t.w + x]);
+  // Same arithmetic, in the same order, as a straightforward version; written without a helper closure because this
+  // is the simulator's hottest function (19 samples per sensor per brain tick).
+  const w = t.w, h = t.h, d = t.dark;
+  let g00 = 0, g10 = 0, g01 = 0, g11 = 0;
+  if (x0 >= 0 && y0 >= 0 && x0 + 1 < w && y0 + 1 < h) {
+    const i = y0 * w + x0;
+    g00 = d[i]; g10 = d[i + 1]; g01 = d[i + w]; g11 = d[i + w + 1];
+  } else {
+    const at = (x: number, y: number) => (x < 0 || y < 0 || x >= w || y >= h ? 0 : d[y * w + x]);
+    g00 = at(x0, y0); g10 = at(x0 + 1, y0); g01 = at(x0, y0 + 1); g11 = at(x0 + 1, y0 + 1);
+  }
   return (
-    g(x0, y0) * (1 - ax) * (1 - ay) + g(x0 + 1, y0) * ax * (1 - ay) +
-    g(x0, y0 + 1) * (1 - ax) * ay + g(x0 + 1, y0 + 1) * ax * ay
+    g00 * (1 - ax) * (1 - ay) + g10 * ax * (1 - ay) +
+    g01 * (1 - ax) * ay + g11 * ax * ay
   );
 }
 
