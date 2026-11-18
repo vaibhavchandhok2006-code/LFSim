@@ -143,3 +143,12 @@ CSV / PNG / HTML report / GIF (2.0 MB) downloads, dark theme. No page or worker 
 | Track set rr-2027: 500 tracks, 4 m mat, all pass the rule checks at generation, 3 checkpoints each | 500 / 500 | pass. Median 129 junctions, 73 m of line, 69 loops; junctions per m² like the reference maze. Finish at the far end in about 80 % of mazes. Made in 1,043 s on 2 workers |
 | Sample tracks look like Shaastra 2027 mazes | your review | **pending** |
 | What-if, RMI test rig, Trémaux, 300 s dry run, 40 held-out 4 m tracks × 3 variations | report | 4.2 % of sessions finish (95 % interval 1.8–9.4 %), median official time 223 s; sessions without a finish reached checkpoint C ≥ 1 in 65 of 115 (C1 36, C2 16, C3 13). Run ends: stopped away 194, re-entry 170, gave up 118. 18 sessions/min on 2 cores |
+
+## Generator v3 (route style) — 2026-11-19
+| Check | Expected | Result |
+| --- | --- | --- |
+| Feature counts within the reference budget (test, 6 mazes) | within | pass |
+| Set rr-2027 v3: 500 tracks pass the rule checks at generation | 500 / 500 | pass (1,740 s on 2 workers; most tries are rejected by the hidden-finish rule) |
+| Average per maze vs the sample maze (sample in brackets) | similar or a little more | zigzag 1.3 (1), half-circle bump 1.4 (1), rectangles 4.4 (≈ 8; the photos show 3–6), comb 1.0 (1), circles 0.9 (2; photos 0–3), diamond/V 0.5 (1), triangle chain 0.3 (1), meander 0.1 (1), S-bend 0.2 (1), oval 0.1 (0–1 on photos), stubs 2.9, diagonals 2.4 (≈ 6), rounded corners 2.0. Junctions median 31 (10–90 %: 23–38), dead ends 11, loops 10, line length 30 m (sample 32 m). Long features (meander, S-bend, triangles) are often dropped when they would touch another line |
+| Sample tracks look like Shaastra mazes | your review | **pending** |
+| What-if, RMI test rig, Trémaux, 300 s dry run, 40 held-out tracks × 3 variations | report | 3.3 % of sessions finish (95 % interval 1.3–8.3 %) |
