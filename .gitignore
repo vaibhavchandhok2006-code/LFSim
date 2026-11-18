@@ -12,3 +12,6 @@ lab/tracksets/
 
 # Compiled native firmware (rebuilt from sources)
 lab/.cache/
+lab/firmware/examples/*/build/
+lab/firmware/examples/*/sdkconfig
+lab/firmware/examples/*/sdkconfig.old

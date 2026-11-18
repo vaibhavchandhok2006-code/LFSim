@@ -5,6 +5,7 @@ import type { StartMsg } from '../../src/worker/protocol';
 
 export interface RunOptions {
   firmware?: (msg: StartMsg) => FirmwareBrain; // native firmware (LFSim Lab Phase 2)
+  onConsole?: (t: number, line: string) => void; // the firmware's serial output
   seconds: number;          // simulated time limit
   chunk_s?: number;         // advance step (does not change results; the website uses 2 s)
   stopAtFinish?: boolean;   // end once the robot reached the finish and its brain stopped (default true)
@@ -28,6 +29,7 @@ export interface RunSummary {
 export async function runHeadless(start: Omit<StartMsg, 'type' | 'runId'>, o: RunOptions): Promise<{ engine: Engine; summary: RunSummary }> {
   if (!(o.seconds > 0 && o.seconds <= 600)) throw new Error('seconds must be between 0 and 600 (the 10-minute recording limit).');
   const e = new Engine({ type: 'start', runId: 1, ...start }, { firmware: o.firmware });
+  if (o.onConsole) e.sim.onConsole = o.onConsole;
   const chunk = o.chunk_s ?? 2;
   const stopAtFinish = o.stopAtFinish ?? true;
   let t = 0;

@@ -9,8 +9,8 @@ import type { StartMsg, Wiring } from '../../src/worker/protocol';
 import os from 'node:os';
 import path from 'node:path';
 
-const REF = new URL('../firmware/examples/reference/', import.meta.url).pathname;
-const RIG = new URL('../firmware/examples/rmi-test-rig/main.c', import.meta.url).pathname;
+const REF = new URL('../firmware/examples/reference/main/', import.meta.url).pathname;
+const RIG = new URL('../firmware/examples/rmi-test-rig/main/main.c', import.meta.url).pathname;
 const ROBOT = new URL('../examples/rmi-test-rig.robot.json', import.meta.url).pathname;
 // The reference firmware is written for a 1 kHz FreeRTOS tick (pdMS_TO_TICKS(2) = 2), like Code mode assumes.
 let refExe = '';

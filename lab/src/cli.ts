@@ -10,6 +10,10 @@ import { loadCompetition, parseCompetition } from './competition';
 import { makeTrackSet, recheckSet, loadTrackSet, writePng, writeSheet, DEFAULT_TEMPLATE, type Part } from './tracksets';
 import { trackStats } from './stats';
 import { buildGraph } from '../../src/track/graph';
+import { buildFirmware, NativeFirmwareBrain } from './native';
+import { loadWiring, parseOperator } from './firmwareSpec';
+import type { FirmwareBrain } from '../../src/brain/firmware';
+import type { StartMsg } from '../../src/worker/protocol';
 import { designFromRobot, loadDesign } from './design';
 import { runBench, summarise } from './bench';
 import { writeProgress, writeResults } from './report';
@@ -66,6 +70,12 @@ run options
   --algorithm <name>            Settings mode algorithm: ${ALGORITHMS.join(', ')}
   --seed <n>                    disturbance seed
   --memory <file.json>          robot memory from an earlier run (memory run)
+  --firmware a.c[,b.c]          run your C firmware (ESP-IDF) compiled for the simulator instead of a robot file's code
+  --wiring <wiring.json>        GPIOs of the sensors, driver and buttons (needed with --firmware)
+  --presses 4@0.3,4@3.8         button presses: GPIO@seconds (the operator pressing your start / calibrate buttons)
+  --sweep 0.5-3.6               hand sweep of the sensor bar across the line for calibration (from-to seconds)
+  --freertos-hz 100|1000        your sdkconfig CONFIG_FREERTOS_HZ (default 100, the ESP-IDF default)
+  --serial <file>               write the firmware's serial output (printf, ESP_LOG) with times
   --corners x1,y1,...,x4,y4     angled photo: the mat's corners in % of the image (TL, TR, BR, BL)
   --track-png <file>            write the track as the simulator sees it (to check an import)
   --seconds <s>                 simulated time limit (default 120, max 600)
@@ -113,7 +123,7 @@ export async function main(argv: string[]): Promise<number> {
   if (cmd === 'tracks make' || cmd === 'tracks check' || cmd === 'tracks sheet') return tracksCmd(cmd, flags);
   if (cmd === 'bench') return benchCmd(flags);
   if (cmd !== 'run') throw new Error(`Unknown command "${cmd}". Try: npm run lab -- help`);
-  const known = new Set(['project', 'track', 'robot', 'mode', 'algorithm', 'seed', 'memory', 'seconds', 'keep-going', 'csv', 'json', 'save-memory', 'chunk', 'corners', 'track-png']);
+  const known = new Set(['project', 'track', 'robot', 'mode', 'algorithm', 'seed', 'memory', 'seconds', 'keep-going', 'csv', 'json', 'save-memory', 'chunk', 'corners', 'track-png', 'firmware', 'wiring', 'presses', 'sweep', 'freertos-hz', 'serial']);
   for (const k of flags.keys()) if (!known.has(k)) throw new Error(`Unknown option --${k}`);
   const mode = str(flags, 'mode');
   if (mode !== undefined && mode !== 'settings' && mode !== 'code') throw new Error('--mode must be settings or code.');
@@ -131,8 +141,28 @@ export async function main(argv: string[]): Promise<number> {
     for (let i = 0; i < g.length; i += 1) g[i] = t.dark[i] > 0.5 ? 0 : 255;
     writePng(trackPng, g, t.w, t.h);
   }
+  // Native firmware: compile the C sources for the simulator and run them in lock-step.
+  const fwFiles = str(flags, 'firmware');
+  let firmware: ((m: StartMsg) => FirmwareBrain) | undefined;
+  const serial: string[] = [];
+  if (fwFiles) {
+    const wf = str(flags, 'wiring');
+    if (!wf) throw new Error('--firmware needs --wiring <wiring.json> (which GPIOs the sensors, driver and buttons use).');
+    const wiring = loadWiring(wf);
+    const hz = num(flags, 'freertos-hz');
+    if (hz !== undefined && ![100, 250, 500, 1000].includes(hz)) throw new Error('--freertos-hz must be 100, 250, 500 or 1000 (your sdkconfig CONFIG_FREERTOS_HZ).');
+    const t = Date.now();
+    const built = buildFirmware(fwFiles.split(',').map((f) => f.trim()), { defines: hz ? [`CONFIG_FREERTOS_HZ=${hz}`] : [] });
+    process.stderr.write(`firmware: ${built.cached ? 'already built' : `compiled in ${Date.now() - t} ms`}\n`);
+    const operator = parseOperator(str(flags, 'presses'), str(flags, 'sweep'));
+    start.brain = { mode: 'code', code: '', wiring };
+    start.operator = operator ?? undefined;
+    firmware = (m) => { const b = new NativeFirmwareBrain(built.exe, wiring, m.profile, operator); return b; };
+  } else if (flags.has('wiring') || flags.has('presses') || flags.has('sweep') || flags.has('freertos-hz')) throw new Error('--wiring, --presses, --sweep and --freertos-hz go with --firmware.');
   const t0 = Date.now();
-  const { engine, summary } = await runHeadless(start, { seconds: num(flags, 'seconds') ?? 120, chunk_s: num(flags, 'chunk'), stopAtFinish: !flags.has('keep-going') });
+  const { engine, summary } = await runHeadless(start, { seconds: num(flags, 'seconds') ?? 120, chunk_s: num(flags, 'chunk'), stopAtFinish: !flags.has('keep-going'), firmware, onConsole: (t, l) => serial.push(`${t.toFixed(3)}\t${l}`) });
+  const sf = str(flags, 'serial');
+  if (sf) fs.writeFileSync(sf, serial.join('\n') + '\n');
   const wall = (Date.now() - t0) / 1000;
   const csv = str(flags, 'csv'), json = str(flags, 'json'), mem = str(flags, 'save-memory');
   if (csv) fs.writeFileSync(csv, engine.csv(Infinity) + '\n');
