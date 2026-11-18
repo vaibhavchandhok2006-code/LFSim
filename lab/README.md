@@ -14,7 +14,7 @@ npm run lab -- run --project my.lfsim.json --seconds 120 --csv run.csv --json ru
 npm run lab -- run --track public/samples/roborun-sample.png --robot my.robot.json
 npm run lab -- run --track photo.png --corners 47.5,37.8,96.6,53.1,73.6,103.3,1.6,69.7 --track-png flat.png
 
-npm run lab -- tracks make --out lab/tracksets/rr-2027        # 300 tuning + 200 held-out tracks (~35 min)
+npm run lab -- tracks make --out lab/tracksets/rr-2027        # 300 tuning + 200 held-out variations of the Shaastra maze
 npm run lab -- tracks check --set lab/tracksets/rr-2027
 npm run lab -- tracks sheet --set lab/tracksets/rr-2027       # review page with samples and statistics
 npm run lab -- bench --set lab/tracksets/rr-2027 --robot lab/examples/rmi-test-rig.robot.json --algorithm tremaux
@@ -35,6 +35,7 @@ Windows setup: [docs/WINDOWS_SETUP.md](docs/WINDOWS_SETUP.md).
 | `competition/roborun-2027.json` | Robo-Run rules as data (sizes, session, penalties; operator timings are estimates) |
 | `src/competition.ts` | Loads and checks a competition file; the rulebook's time score |
 | `src/tracks.ts` | Generated track → imported like an image → checked against the rules |
+| `src/templates.ts` | Variations of a real maze: trace, fit to the mat, rotate / mirror, stretch, easy / normal / hard |
 | `src/tracksets.ts`, `trackWorker.ts` | Track sets (PNG + manifest, made on all cores), tuning / held-out split, checkpoints, review sheet |
 | `src/stats.ts` | Track statistics (junctions, loops, dead ends, curves) for real and generated tracks |
 | `src/session.ts` | A whole 10-minute session: exploration, memory runs, aborts, penalties, official time |

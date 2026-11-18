@@ -40,7 +40,7 @@ export const DEFAULT_GEN: Omit<GenOptions, 'seed'> = {
   budget: REFERENCE_BUDGET, branches: [4, 7], shortcuts: [3, 5], merge: 0.45, squareSide_m: 0.2,
 };
 
-type P2 = [number, number];
+export type P2 = [number, number];
 export interface GenElement { pts: P2[]; owner: string } // a drawn polyline; owner = the edge or junction it belongs to
 export interface GeneratedMaze {
   seed: number;
@@ -192,11 +192,11 @@ function arcPts(cx: number, cy: number, r: number, a0: number, a1: number): P2[]
 
 // Local edge frame: x along the edge from 0 to L, y across it. Each builder returns polylines (elements) whose ends are
 // where they meet other lines.
-type Local = P2[][];
+export type Local = P2[][];
 const range = (rng: Rng, a: number, b: number) => a + rng.next() * (b - a);
 const side = (rng: Rng) => (rng.next() < 0.5 ? 1 : -1);
 
-function buildEdge(f: Feature, L: number, rng: Rng, across: number, sc = 1): Local | null {
+export function buildEdge(f: Feature, L: number, rng: Rng, across: number, sc = 1): Local | null {
   // Feature sizes scale with the route spacing (sc = 1 at 37.5 cm); clearance limits stay absolute.
   const R = (lo: number, hi: number): number => range(rng, lo * sc, hi * sc);
   // `across` = free room on each side of the edge (m) before another lattice edge.
@@ -309,7 +309,7 @@ function buildEdge(f: Feature, L: number, rng: Rng, across: number, sc = 1): Loc
 // True if two different drawn lines come closer than `minSep` anywhere except where they are meant to meet.
 // Near a junction, lines that meet at an angle are close for a while; that is meant. Two points count as touching
 // by accident only if the way between them along the lines (via the junction) is much longer than the gap.
-function contacts(els: GenElement[], minSep: number, joinR: number, size: number, margin: number): Set<string> {
+export function contacts(els: GenElement[], minSep: number, joinR: number, size: number, margin: number): Set<string> {
   const step = 0.01;
   const pts: { x: number; y: number; e: number; s: number }[] = [];
   els.forEach((el, e) => {

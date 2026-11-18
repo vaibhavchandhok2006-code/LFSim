@@ -28,7 +28,14 @@ Parts:
 pixel for pixel, so a result can always be checked again. A random-number generator is really a long fixed sequence;
 the seed picks where in it you start.
 
-**Generating a maze (version 3).** Real Shaastra mazes are one long route that winds from the start corner to the
+**Variations of a real maze (version 4, the default).** The best reference is the real maze itself. The program
+traces the clean Shaastra image into lines and junctions (the same junction finder the simulator uses), then makes
+variations: it rotates or mirrors it, stretches some rows and columns and squeezes others (straight lines stay
+straight), swaps one wiggly feature for another, and makes it easier (fewer dead ends, fewer wiggles) or harder (more
+stubs and features). Every variation passes the same rule checks. One finding: the real maze failed our first
+"hidden finish" rule, so that rule was too strict and is now calibrated on the real maze.
+
+**Generating a maze from scratch (version 3, `--style route`).** Real Shaastra mazes are one long route that winds from the start corner to the
 finish, band by band, with features on it, a few dead-end branches, a few shortcuts, and a lot of white space. The
 generator does the same, and places a *budget* of features counted by eye on the reference mazes (for example 1–2
 zigzags and 1–2 circles per maze, not six). A test checks every maze stays within that budget. Earlier versions,

@@ -7,7 +7,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { loadCompetition, parseCompetition } from './competition';
-import { makeTrackSet, recheckSet, loadTrackSet, writePng, writeSheet, type Part } from './tracksets';
+import { makeTrackSet, recheckSet, loadTrackSet, writePng, writeSheet, DEFAULT_TEMPLATE, type Part } from './tracksets';
 import { trackStats } from './stats';
 import { buildGraph } from '../../src/track/graph';
 import { designFromRobot, loadDesign } from './design';
@@ -37,6 +37,9 @@ tracks make options
   --tune <n> --held <n>         tracks in each part (default 300 and 200)
   --name <text>                 set name (default: the folder name)
   --workers <n>                 parallel workers (default: CPU cores − 1)
+  --style template|route        template (default): variations of real mazes, easy / normal / hard;
+                                route: generated route-style mazes
+  --template a.png,b.png        clean top-down images of real mazes to vary (default: the Shaastra sample)
   --competition <file.json>     rules file (default: lab/competition/roborun-2027.json)
 
 bench options
@@ -153,7 +156,7 @@ const competitionFrom = (flags: Map<string, string | true>) => {
 
 async function tracksCmd(cmd: string, flags: Map<string, string | true>): Promise<number> {
   if (cmd === 'tracks make') {
-    onlyFlags(flags, ['out', 'tune', 'held', 'name', 'competition', 'workers']);
+    onlyFlags(flags, ['out', 'tune', 'held', 'name', 'competition', 'workers', 'style', 'template']);
     const out = str(flags, 'out'); if (!out) throw new Error('--out <folder> is needed.');
     if (fs.existsSync(path.join(out, 'manifest.json'))) throw new Error(`${out} already holds a track set; choose a new folder.`);
     const tune = num(flags, 'tune') ?? 300, held = num(flags, 'held') ?? 200;
@@ -162,7 +165,11 @@ async function tracksCmd(cmd: string, flags: Map<string, string | true>): Promis
     const t0 = Date.now();
     const workers = num(flags, 'workers');
     if (workers !== undefined && !(Number.isInteger(workers) && workers >= 0 && workers <= 256)) throw new Error('--workers must be a whole number from 0 to 256.');
-    const m = await makeTrackSet(out, str(flags, 'name') ?? path.basename(out), c, { tune, held }, (d, t) => { if (d % 10 === 0 || d === t) process.stdout.write(`\r${d}/${t} tracks`); }, workers);
+    const style = str(flags, 'style') ?? 'template';
+    if (style !== 'template' && style !== 'route') throw new Error('--style must be template or route.');
+    const templates = style === 'route' ? [] : (str(flags, 'template')?.split(',').map((f) => f.trim()).filter(Boolean) ?? [DEFAULT_TEMPLATE]);
+    for (const f of templates) if (!fs.existsSync(f)) throw new Error(`Template image not found: ${f}`);
+    const m = await makeTrackSet(out, str(flags, 'name') ?? path.basename(out), c, { tune, held }, (d, t) => { if (d % 10 === 0 || d === t) process.stdout.write(`\r${d}/${t} tracks`); }, workers, templates);
     process.stdout.write(`\nwrote ${m.entries.length} tracks to ${out} in ${((Date.now() - t0) / 1000).toFixed(0)} s\n`);
     return 0;
   }

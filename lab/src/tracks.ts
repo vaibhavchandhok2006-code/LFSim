@@ -6,6 +6,7 @@ import { adjacency, buildGraph, runRule, shortestPath, type JunctionGraph } from
 import { DEFAULT_PROFILE } from '../../src/sim/profile';
 import type { Competition } from './competition';
 import type { Checkpoint } from './session';
+import { templateFromImage, templateVariant, type Level, type Template } from './templates';
 
 export interface TrackCheck {
   ok: boolean;
@@ -42,8 +43,10 @@ export function checkpointsFor(g: JunctionGraph): Checkpoint[] {
 }
 
 // A plain line follower "easily finds" the finish if a wall-following rule reaches it without travelling much more than
-// the shortest route. Assumption (the rulebook gives no number): it must need at least this factor.
-export const HIDDEN_FACTOR = 1.5;
+// the shortest route. The rulebook gives no number; calibrated on the real Shaastra sample maze, where the left-hand
+// rule needs 1.20 × and the right-hand rule 1.31 × the shortest route: a maze is rejected only if BOTH rules reach the
+// finish within this factor.
+export const HIDDEN_FACTOR = 1.15;
 
 export function checkTrack(track: Track, g: JunctionGraph, c: Competition): TrackCheck {
   const problems: string[] = [];
@@ -85,7 +88,7 @@ export function checkTrack(track: Track, g: JunctionGraph, c: Competition): Trac
   }
   const lh = runRule(g, 'left'), rh = runRule(g, 'right');
   const easy = (r: typeof lh) => r.ok && sp.ok && r.length_m < HIDDEN_FACTOR * sp.length_m;
-  if (easy(lh) || easy(rh)) problems.push(`a ${easy(lh) ? 'left' : 'right'}-hand wall follower finds the finish easily`);
+  if (easy(lh) && easy(rh)) problems.push('both left- and right-hand wall followers find the finish easily');
   let junctions = 0, deadEnds = 0;
   for (const n of g.nodes.values()) { if (n.degree >= 3) junctions += 1; if (n.degree === 1 && n.id !== g.start && n.id !== g.finish) deadEnds += 1; }
   return {
@@ -121,4 +124,34 @@ export function generateTrack(seed: number, c: Competition, gen: Partial<GenOpti
     rejected.push(`${sub}: ${check.problems.join('; ')}`);
   }
   throw new Error(`No valid maze for seed ${seed} in ${maxTries} tries: ${rejected.slice(-3).join(' | ')}`);
+}
+
+// Variations of real mazes (the default for track sets): the template for a seed is picked from the list, the level
+// is easy / normal / hard about 30 / 40 / 30 %. A variation that breaks a rule is replaced by the next sub-seed.
+const templateCache = new Map<string, Template>();
+export function loadTemplate(file: string): Template {
+  let t = templateCache.get(file);
+  if (!t) { t = templateFromImage(file, file.split('/').pop()!); templateCache.set(file, t); }
+  return t;
+}
+export function levelFor(seed: number): Level {
+  const r = ((Math.imul(seed >>> 0, 2654435761) >>> 0) % 10);
+  return r < 3 ? 'easy' : r < 7 ? 'normal' : 'hard';
+}
+export function generateTemplateTrack(seed: number, c: Competition, templates: string[], maxTries = 40): GeneratedTrack & { subSeed: number; rejected: string[]; level: Level; template: string } {
+  if (!templates.length) throw new Error('No template images given.');
+  const file = templates[seed % templates.length];
+  const t = loadTemplate(file);
+  const level = levelFor(seed);
+  const rejected: string[] = [];
+  for (let k = 0; k < maxTries; k += 1) {
+    const sub = seed * 1000 + k;
+    const maze = templateVariant(t, { seed: sub, level, size_m: (c.mat.gridN * c.mat.cell_cm) / 100, lineWidth_cm: [c.mat.lineWidth_cm.min, c.mat.lineWidth_cm.max] });
+    const { track, gray } = trackFromMaze(maze, `var-${seed}.png`);
+    const graph = buildGraph(track);
+    const check = checkTrack(track, graph, c);
+    if (check.ok) return { maze, track, graph, check, gray, checkpoints: checkpointsFor(graph), subSeed: sub, rejected, level, template: t.name };
+    rejected.push(`${sub}: ${check.problems.join('; ')}`);
+  }
+  throw new Error(`No valid variation for seed ${seed} of ${file} in ${maxTries} tries: ${rejected.slice(-3).join(' | ')}`);
 }

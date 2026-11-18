@@ -12,11 +12,13 @@ import { buildGraph } from '../../src/track/graph';
 import type { Feature } from '../../src/track/generate';
 import type { Competition } from './competition';
 import type { Checkpoint } from './session';
-import { generateTrack, checkTrack, type TrackCheck } from './tracks';
+import { generateTrack, generateTemplateTrack, checkTrack, type TrackCheck } from './tracks';
 import { trackStats, type TrackStats } from './stats';
 
-export const GENERATOR_VERSION = 3; // 3: route-style mazes with a feature budget from the reference mazes (2: 4 m lattice)
-export const HELD_OUT_SEED_BASE = 1_000_000; // held-out seeds start here; tuning seeds start at 1
+export const GENERATOR_VERSION = 4; // 4: variations of real mazes (templates) by default; 3: // 3: route-style mazes with a feature budget from the reference mazes (2: 4 m lattice)
+export const HELD_OUT_SEED_BASE = 1_000_000;
+// The real Shaastra maze that track sets vary by default (empty list = generated route-style mazes).
+export const DEFAULT_TEMPLATE = new URL('../../public/samples/roborun-sample.png', import.meta.url).pathname; // held-out seeds start here; tuning seeds start at 1
 
 export type Part = 'tune' | 'held';
 export interface SetEntry {
@@ -24,6 +26,8 @@ export interface SetEntry {
   part: Part;
   seed: number;             // generator seed (the sub-seed that passed the checks)
   file: string;             // PNG, relative to the set folder
+  source: string;           // 'route' (generated) or the template image it varies
+  level: string;            // easy / normal / hard (template variations), or 'route'
   size_m: number;           // mat side
   lineWidth_cm: number;
   checkpoints: Checkpoint[];
@@ -48,25 +52,25 @@ export function writePng(file: string, gray: Uint8ClampedArray, w: number, h: nu
   fs.writeFileSync(file, PNG.sync.write(png, { colorType: 0, inputColorType: 6 }));
 }
 
-export interface TrackJob { part: Part; k: number; seed: number; dir: string; competition: Competition }
+export interface TrackJob { part: Part; k: number; seed: number; dir: string; competition: Competition; templates: string[] }
 
 // Generate one track of a set and save its PNG (runs on a worker thread when the set is made in parallel).
 export function makeOne(j: TrackJob): SetEntry {
-  const t = generateTrack(j.seed, j.competition);
+  const t = j.templates.length ? generateTemplateTrack(j.seed, j.competition, j.templates) : { ...generateTrack(j.seed, j.competition), level: 'route', template: 'route' };
   const id = `${j.part}-${String(j.k + 1).padStart(4, '0')}`;
   const file = `tracks/${id}.png`;
   writePng(path.join(j.dir, file), t.gray, t.track.w, t.track.h);
   return {
-    id, part: j.part, seed: t.subSeed, file, size_m: t.maze.size_m, checkpoints: t.checkpoints,
+    id, part: j.part, seed: t.subSeed, file, source: t.template, level: t.level, size_m: t.maze.size_m, checkpoints: t.checkpoints,
     lineWidth_cm: +(t.maze.lineWidth_m * 100).toFixed(2), corner: t.maze.corner, features: t.maze.features, check: t.check, stats: trackStats(t.track, t.graph),
   };
 }
 
-export async function makeTrackSet(dir: string, name: string, c: Competition, counts: { tune: number; held: number }, onProgress?: (done: number, total: number) => void, workers = Math.max(1, os.availableParallelism() - 1)): Promise<TrackSetManifest> {
+export async function makeTrackSet(dir: string, name: string, c: Competition, counts: { tune: number; held: number }, onProgress?: (done: number, total: number) => void, workers = Math.max(1, os.availableParallelism() - 1), templates: string[] = [DEFAULT_TEMPLATE]): Promise<TrackSetManifest> {
   fs.mkdirSync(path.join(dir, 'tracks'), { recursive: true });
   const jobs: TrackJob[] = [
-    ...Array.from({ length: counts.tune }, (_, k) => ({ part: 'tune' as Part, k, seed: 1 + k, dir, competition: c })),
-    ...Array.from({ length: counts.held }, (_, k) => ({ part: 'held' as Part, k, seed: HELD_OUT_SEED_BASE + 1 + k, dir, competition: c })),
+    ...Array.from({ length: counts.tune }, (_, k) => ({ part: 'tune' as Part, k, seed: 1 + k, dir, competition: c, templates })),
+    ...Array.from({ length: counts.held }, (_, k) => ({ part: 'held' as Part, k, seed: HELD_OUT_SEED_BASE + 1 + k, dir, competition: c, templates })),
   ];
   const entries: SetEntry[] = new Array(jobs.length);
   let done = 0;
