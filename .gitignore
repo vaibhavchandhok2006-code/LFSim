@@ -9,3 +9,6 @@ lab/references/*.png
 lab/references/*.jpg
 results/
 lab/tracksets/
+
+# Compiled native firmware (rebuilt from sources)
+lab/.cache/

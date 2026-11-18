@@ -29,12 +29,13 @@ export class Engine {
 
   // record = false skips frames and CSV rows (headless benchmarks that only need the outcome).
   private readonly recordOn: boolean;
-  constructor(msg: StartMsg, opts: { record?: boolean } = {}) {
+  // opts.firmware: build the firmware brain another way (LFSim Lab: native C firmware in its own process).
+  constructor(msg: StartMsg, opts: { record?: boolean; firmware?: (msg: StartMsg) => FirmwareBrain } = {}) {
     this.recordOn = opts.record ?? true;
     this.runId = msg.runId;
     let brain: Brain;
     if (msg.brain.mode === 'settings') brain = new SettingsBrain(msg.brain.settings);
-    else { this.firmware = new FirmwareBrain(msg.brain.code, msg.brain.wiring, msg.profile); brain = this.firmware; }
+    else { this.firmware = opts.firmware ? opts.firmware(msg) : new FirmwareBrain(msg.brain.code, msg.brain.wiring, msg.profile, msg.operator ?? null); brain = this.firmware; }
     this.sim = new Simulation(msg.track, msg.profile, brain, msg.flags, { distance_cm: msg.offLine_cm }, msg.memory);
     this.sim.disturb = makeDisturbance(msg.track, msg.disturbances, msg.profile);
     this.sim.onConsole = (t, text) => this.consoleOut.push({ t, text });
@@ -80,6 +81,9 @@ export class Engine {
   }
 
   // Advance until simulated time reaches `until` or the run ends. Async so Code mode can await hardware calls.
+  // Release anything the run holds (a native firmware process).
+  dispose(): void { this.firmware?.dispose(); }
+
   async advance(until: number): Promise<void> {
     const s = this.sim;
     try {

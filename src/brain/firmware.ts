@@ -5,7 +5,7 @@
 import { Brain, BrainIO } from './brain';
 import { RobotProfile } from '../sim/profile';
 import type { Simulation } from '../sim/simulation';
-import type { Wiring } from '../worker/protocol';
+import type { OperatorScript, Wiring } from '../worker/protocol';
 
 const TICK = 0.001;
 // Seconds of simulated CPU time per call. analogRead: ESP32 ≈ 10 µs, AVR (Uno/Nano at 16 MHz, prescaler 128) ≈ 112 µs.
@@ -20,7 +20,7 @@ const BLOCKED = ['self', 'globalThis', 'window', 'document', 'fetch', 'XMLHttpRe
   'caches', 'postMessage', 'close', 'navigator', 'location', 'localStorage', 'sessionStorage', 'EventSource', 'Worker'];
 
 export class FirmwareBrain implements Brain {
-  readonly name = 'Code mode';
+  readonly name: string = 'Code mode';
   readonly loopHz = 0; // the firmware drives time itself
   private sim!: Simulation;
   private profile: RobotProfile;
@@ -44,10 +44,21 @@ export class FirmwareBrain implements Brain {
   private stoppedSince: number | null = null;
   private lineBuf = '';
   private lastLine = '';
-  private compiled: { setup?: () => Promise<void>; loop?: () => Promise<void>; app_main?: () => Promise<void> } | null = null;
+  protected compiled: { setup?: () => Promise<void>; loop?: () => Promise<void>; app_main?: () => Promise<void> } | null = null;
 
-  constructor(code: string, wiring: Wiring, profile: RobotProfile) {
-    this.code = code; this.wiring = wiring; this.profile = profile;
+  private operator: OperatorScript | null;
+  private nextPress = 0;
+  private pressEvents: { t: number; gpio: number; down: boolean }[] = [];
+  private intrType = new Map<number, number>(); // ESP-IDF gpio_config intr_type per pin (1 pos, 2 neg, 3 any edge)
+
+  constructor(code: string, wiring: Wiring, profile: RobotProfile, operator: OperatorScript | null = null) {
+    this.code = code; this.wiring = wiring; this.profile = profile; this.operator = operator;
+    // Buttons rest at their released level; the operator's presses become timed edges.
+    for (const b of wiring.buttons ?? []) this.pinLevel.set(b.gpio, b.activeLow ? 1 : 0);
+    for (const p of operator?.presses ?? []) {
+      this.pressEvents.push({ t: p.at_s, gpio: p.gpio, down: true }, { t: p.at_s + (p.hold_s ?? 0.15), gpio: p.gpio, down: false });
+    }
+    this.pressEvents.sort((a, b) => a.t - b.t);
     this.avr = wiring.board === 'avr';
     // The board's ADC sets the numbers the code reads: AVR is always 10-bit; ESP32 reads 12-bit by default.
     this.readBits = this.avr ? 10 : 12;
@@ -75,6 +86,7 @@ export class FirmwareBrain implements Brain {
       this.applyMotors();
       this.sim.tick();
       this.fireEncoderInterrupts();
+      this.operatorStep();
       const both0 = this.sim.dutyL === 0 && this.sim.dutyR === 0;
       if (both0) { if (this.stoppedSince === null) this.stoppedSince = this.sim.time; } else this.stoppedSince = null;
       this.afterTick();
@@ -115,6 +127,38 @@ export class FirmwareBrain implements Brain {
       this.failure = e instanceof Error ? e : new Error(String(e));
       this.sim.events.push({ t: this.sim.time, kind: 'log', text: `Firmware error: ${this.failure.message}`, x: this.sim.body.x, y: this.sim.body.y });
     }
+  }
+
+  // ---------------- operator: buttons and the calibration sweep ----------------
+  private operatorStep() {
+    while (this.nextPress < this.pressEvents.length && this.pressEvents[this.nextPress].t <= this.sim.time + 1e-9) {
+      const ev = this.pressEvents[this.nextPress++];
+      const b = (this.wiring.buttons ?? []).find((x) => x.gpio === ev.gpio);
+      const activeLow = b ? b.activeLow : true;
+      const level = ev.down === activeLow ? 0 : 1;
+      const prev = this.pinLevel.get(ev.gpio) ?? (activeLow ? 1 : 0);
+      if (level === prev) continue;
+      this.pinLevel.set(ev.gpio, level);
+      const falling = level === 0;
+      for (const isr of this.isrs) {
+        if (isr.pin !== ev.gpio) continue;
+        const t = this.intrType.get(ev.gpio);
+        const fire = isr.mode === 'CHANGE' || t === 3 || (falling ? isr.mode === 'FALLING' || t === 2 : isr.mode === 'RISING' || t === 1);
+        if (fire) isr.fn();
+      }
+    }
+  }
+  // During a hand sweep, a line passes back and forth under the sensor bar (the robot itself does not move).
+  private sweepRaw(i: number): number | null {
+    const sw = this.operator?.sweep;
+    if (!sw || this.sim.time < sw.from_s || this.sim.time > sw.to_s) return null;
+    const s = this.profile.sensor, n = s.channels, pitch = s.spacing_mm / 1000;
+    const xi = (i - (n - 1) / 2) * pitch;
+    const half = ((n - 1) / 2) * pitch + 0.03;
+    const line = half * Math.sin((2 * Math.PI * (this.sim.time - sw.from_s)) / (sw.period_s ?? 1.2));
+    const w = 0.019; // half line width
+    const cov = Math.max(0, Math.min(1, (w + 0.004 - Math.abs(xi - line)) / 0.008));
+    return Math.round(s.whiteRaw + (s.blackRaw - s.whiteRaw) * cov);
   }
 
   // ---------------- motors ----------------
@@ -162,6 +206,8 @@ export class FirmwareBrain implements Brain {
 
   // ---------------- sensors ----------------
   private sensorRaw(i: number): number {
+    const sw = this.sweepRaw(i);
+    if (sw !== null) return sw;
     const b = this.sim.body;
     return this.sim.sensors.readOne(i, this.sim.track, b.x, b.y, b.theta, this.sim.disturb);
   }
@@ -191,7 +237,7 @@ export class FirmwareBrain implements Brain {
   }
 
   // ---------------- the hardware API handed to the firmware ----------------
-  private api(): Record<string, unknown> {
+  protected api(): Record<string, unknown> {
     const self = this;
     const fmt = (f: string, ...a: unknown[]) => { let i = 0; return String(f).replace(/%[-+ 0#]*\d*(?:\.\d+)?[lh]*([dfisuxXc%])/g, (m, t) => (t === '%' ? '%' : t === 'f' ? Number(a[i++]).toFixed(Number((m.match(/\.(\d+)/) ?? [0, 6])[1])) : t === 'x' ? Number(a[i++]).toString(16) : t === 'X' ? Number(a[i++]).toString(16).toUpperCase() : t === 'c' ? String.fromCharCode(Number(a[i++])) : String(t === 'd' || t === 'i' || t === 'u' ? Math.trunc(Number(a[i++])) : a[i++]))); };
     const mem = () => { const m = self.sim.memory as { eeprom?: number[]; prefs?: Record<string, unknown> }; m.eeprom ??= []; m.prefs ??= {}; return m as { eeprom: number[]; prefs: Record<string, unknown> }; };
@@ -231,7 +277,19 @@ export class FirmwareBrain implements Brain {
       portTICK_PERIOD_MS: 1, pdMS_TO_TICKS: (ms: number) => ms, pdTRUE: 1, pdFALSE: 0,
       LEDC_LOW_SPEED_MODE: 0, LEDC_HIGH_SPEED_MODE: 1,
       pinMode: () => self.cost(COST.call),
-      gpio_set_direction: () => self.cost(COST.call), gpio_config: () => self.cost(COST.call), gpio_reset_pin: () => self.cost(COST.call),
+      gpio_set_direction: () => self.cost(COST.call), gpio_reset_pin: () => self.cost(COST.call),
+      // gpio_config: records each pin's interrupt type (GPIO_INTR_POSEDGE 1, NEGEDGE 2, ANYEDGE 3) for button presses.
+      gpio_config: (cfg?: { pin_bit_mask?: number | string; intr_type?: number }) => {
+        self.cost(COST.call);
+        const mask = BigInt(cfg?.pin_bit_mask ?? 0);
+        for (let p = 0; p < 64; p += 1) if ((mask >> BigInt(p)) & 1n) self.intrType.set(p, Number(cfg?.intr_type ?? 0));
+        return ESP_OK;
+      },
+      gpio_install_isr_service: () => ESP_OK,
+      gpio_isr_handler_add: (pin: number, fn: (arg?: unknown) => void, arg?: unknown) => { self.isrs.push({ pin, fn: () => fn(arg), mode: 'IDF' }); return ESP_OK; },
+      gpio_isr_handler_remove: (pin: number) => { self.isrs = self.isrs.filter((i) => i.pin !== pin); return ESP_OK; },
+      gpio_set_intr_type: (pin: number, t: number) => { self.intrType.set(pin, t); return ESP_OK; },
+      gpio_intr_enable: () => ESP_OK, gpio_intr_disable: () => ESP_OK, gpio_set_pull_mode: () => ESP_OK, gpio_pullup_en: () => ESP_OK, gpio_pulldown_dis: () => ESP_OK,
       digitalWrite, gpio_set_level: digitalWrite,
       digitalRead, gpio_get_level: digitalRead,
       analogRead: (pin: number) => self.analogReadPin(pin),
@@ -382,12 +440,15 @@ export class FirmwareBrain implements Brain {
     return api;
   }
 
-  private compile() {
+  protected compile(): { setup?: () => Promise<void>; loop?: () => Promise<void>; app_main?: () => Promise<void> } {
     const api = this.api();
     const names = Object.keys(api);
     const body = `"use strict";\n${this.code}\nreturn { setup: typeof setup === 'function' ? setup : undefined, loop: typeof loop === 'function' ? loop : undefined, app_main: typeof app_main === 'function' ? app_main : undefined };`;
     // eslint-disable-next-line no-new-func
     const fn = new Function(...names, ...BLOCKED, body) as (...a: unknown[]) => FirmwareBrain['compiled'];
     return fn(...names.map((n) => api[n]), ...BLOCKED.map(() => undefined))!;
+  }
+  // Called when the run is over (native firmware: stop its process).
+  dispose(): void {
   }
 }

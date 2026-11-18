@@ -1,0 +1,17 @@
+import { buildFirmware, NativeFirmwareBrain } from './native';
+import { loadInputs } from './inputs';
+import { Engine } from '../../src/worker/engine';
+const t0 = Date.now();
+const b = buildFirmware(['lab/firmware/examples/rmi-test-rig/main.c']);
+console.log('build', b.cached, Date.now() - t0, 'ms', b.log.slice(0, 600));
+const { start } = loadInputs({ track: 'public/samples/roborun-sample.png', robot: '/home/claude/out/rmi-test-rig.robot.json' });
+if (start.brain.mode !== 'code') throw new Error('expected code mode');
+const wiring = { ...start.brain.wiring, buttons: [{ gpio: 4, activeLow: true }] };
+const operator = { presses: [{ gpio: 4, at_s: 0.3 }, { gpio: 4, at_s: 3.8 }, { gpio: 4, at_s: 4.3 }], sweep: { from_s: 0.5, to_s: 3.6 } };
+const msg = { ...start, type: 'start' as const, runId: 1, brain: { ...start.brain, wiring }, operator };
+const e = new Engine(msg, { firmware: (m) => new NativeFirmwareBrain(b.exe, wiring, m.profile, operator) });
+e.sim.onConsole = (t, l) => { if (!/^I \(\d+\) LINE_FOLLOWER: (Pos|ERR)/.test(l)) console.log(t.toFixed(2), l); };
+const t1 = Date.now();
+await e.advance(14);
+console.log('sim', e.sim.time.toFixed(2), 's in', Date.now() - t1, 'ms', 'status', e.status, e.error ?? '', 'dist', e.sim.distance.toFixed(2), 'startTime', e.sim.startTime);
+e.dispose();
