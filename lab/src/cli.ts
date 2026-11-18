@@ -7,7 +7,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { loadCompetition, parseCompetition } from './competition';
-import { makeTrackSet, recheckSet, loadTrackSet, type Part } from './tracksets';
+import { makeTrackSet, recheckSet, loadTrackSet, writePng, type Part } from './tracksets';
 import { designFromRobot, loadDesign } from './design';
 import { runBench, summarise } from './bench';
 import { writeProgress, writeResults } from './report';
@@ -54,6 +54,8 @@ run options
   --algorithm <name>            Settings mode algorithm: ${ALGORITHMS.join(', ')}
   --seed <n>                    disturbance seed
   --memory <file.json>          robot memory from an earlier run (memory run)
+  --corners x1,y1,...,x4,y4     angled photo: the mat's corners in % of the image (TL, TR, BR, BL)
+  --track-png <file>            write the track as the simulator sees it (to check an import)
   --seconds <s>                 simulated time limit (default 120, max 600)
   --keep-going                  do not stop when the finish is reached
   --csv <file>                  write the per-cycle log (same columns as the website's CSV)
@@ -99,7 +101,7 @@ export async function main(argv: string[]): Promise<number> {
   if (cmd === 'tracks make' || cmd === 'tracks check') return tracksCmd(cmd, flags);
   if (cmd === 'bench') return benchCmd(flags);
   if (cmd !== 'run') throw new Error(`Unknown command "${cmd}". Try: npm run lab -- help`);
-  const known = new Set(['project', 'track', 'robot', 'mode', 'algorithm', 'seed', 'memory', 'seconds', 'keep-going', 'csv', 'json', 'save-memory', 'chunk']);
+  const known = new Set(['project', 'track', 'robot', 'mode', 'algorithm', 'seed', 'memory', 'seconds', 'keep-going', 'csv', 'json', 'save-memory', 'chunk', 'corners', 'track-png']);
   for (const k of flags.keys()) if (!known.has(k)) throw new Error(`Unknown option --${k}`);
   const mode = str(flags, 'mode');
   if (mode !== undefined && mode !== 'settings' && mode !== 'code') throw new Error('--mode must be settings or code.');
@@ -107,10 +109,16 @@ export async function main(argv: string[]): Promise<number> {
   if (algorithm !== undefined && !ALGORITHMS.includes(algorithm as Algorithm)) throw new Error(`--algorithm must be one of: ${ALGORITHMS.join(', ')}`);
   const opts: InputOptions = {
     project: str(flags, 'project'), track: str(flags, 'track'), robot: str(flags, 'robot'),
-    mode: mode as InputOptions['mode'], algorithm: algorithm as Algorithm | undefined, seed: num(flags, 'seed'), memory: str(flags, 'memory'),
+    mode: mode as InputOptions['mode'], algorithm: algorithm as Algorithm | undefined, seed: num(flags, 'seed'), memory: str(flags, 'memory'), corners: str(flags, 'corners'),
   };
   const { start, messages } = loadInputs(opts);
   for (const m of messages) process.stderr.write(`track: ${m}\n`);
+  const trackPng = str(flags, 'track-png');
+  if (trackPng) { // the track as the simulator sees it (after any perspective correction), to check an import
+    const t = start.track, g = new Uint8ClampedArray(t.w * t.h);
+    for (let i = 0; i < g.length; i += 1) g[i] = t.dark[i] > 0.5 ? 0 : 255;
+    writePng(trackPng, g, t.w, t.h);
+  }
   const t0 = Date.now();
   const { engine, summary } = await runHeadless(start, { seconds: num(flags, 'seconds') ?? 120, chunk_s: num(flags, 'chunk'), stopAtFinish: !flags.has('keep-going') });
   const wall = (Date.now() - t0) / 1000;

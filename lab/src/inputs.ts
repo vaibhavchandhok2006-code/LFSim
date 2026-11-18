@@ -2,7 +2,7 @@
 // optional robot file. Files are untrusted and go through the same checks as in the website.
 import fs from 'node:fs';
 import path from 'node:path';
-import { DEFAULTS, DEFAULT_TRACK_SETUP, parseImport, type AppSettings, type TrackSetup } from '../../src/ui/persist';
+import { DEFAULTS, DEFAULT_TRACK_SETUP, checkCorners, parseImport, type AppSettings, type TrackSetup } from '../../src/ui/persist';
 import { buildTrackFromRgba } from '../../src/track/buildTrack';
 import type { StartMsg } from '../../src/worker/protocol';
 import type { Algorithm } from '../../src/brain/settings';
@@ -16,6 +16,7 @@ export interface InputOptions {
   algorithm?: Algorithm;
   seed?: number;
   memory?: string;       // JSON file with the robot's memory (EEPROM/NVS) from an earlier run
+  corners?: string;      // angled photo: "x1,y1,x2,y2,x3,y3,x4,y4" in % of the image (TL, TR, BR, BL)
 }
 
 const readText = (p: string) => {
@@ -51,6 +52,11 @@ export function loadInputs(o: InputOptions): Loaded {
     }
   }
   if (!image) throw new Error('No track image: give --project with an embedded image, or --track.');
+  if (o.corners !== undefined) {
+    const v = o.corners.split(',').map(Number);
+    if (v.length !== 8) throw new Error('--corners needs 8 numbers: x1,y1,x2,y2,x3,y3,x4,y4 (in % of the image; top-left, top-right, bottom-right, bottom-left).');
+    setup = { ...setup, corners: checkCorners([[v[0], v[1]], [v[2], v[3]], [v[4], v[5]], [v[6], v[7]]]) };
+  }
   if (o.robot) {
     const imp = parseImport(readText(o.robot));
     if (imp.kind !== 'robot') throw new Error(`${o.robot} is not an LFSim robot file.`);

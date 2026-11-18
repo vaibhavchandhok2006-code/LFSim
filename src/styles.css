@@ -277,3 +277,13 @@ button.icon { padding: 2px 6px; border: none; background: none; color: var(--ink
 .chart .u-legend .u-marker { width: 10px; height: 3px; }
 [data-theme='dark'] .chart .u-legend { color: var(--ink-2); }
 .crop-buttons { grid-column: 1 / -1; margin: 4px 0 0; }
+
+/* Angled-photo corner editor */
+.corner-editor { grid-column: 1 / -1; }
+.corner-editor svg { width: 100%; height: auto; display: block; background: var(--rule-soft); border-radius: var(--radius); touch-action: none; }
+.corner-editor .quad { fill: rgba(36, 87, 197, 0.12); stroke: var(--blue); stroke-width: 4; }
+.corner-editor .quad.bad { fill: rgba(217, 45, 32, 0.12); stroke: var(--red); }
+.corner-editor .handle { cursor: grab; outline: none; }
+.corner-editor .handle circle { fill: var(--blue); stroke: #fff; stroke-width: 5; }
+.corner-editor .handle:focus-visible circle { stroke: var(--amber); stroke-width: 8; }
+.corner-editor .handle text { fill: #fff; font-size: 26px; font-weight: 700; text-anchor: middle; pointer-events: none; }

@@ -2,6 +2,7 @@
 // Project files bundle everything into one JSON for export/import.
 
 import { DEFAULT_PROFILE, profileProblems, RobotProfile } from '../sim/profile';
+import { quadProblem, type Quad } from '../track/warp';
 import { DEFAULT_SETTINGS, SettingsParams } from '../brain/settings';
 import { DEFAULT_FLAGS, SimFlags } from '../sim/simulation';
 import { Disturbances, Wiring } from '../worker/protocol';
@@ -24,6 +25,9 @@ export interface TrackSetup {
   swapStartFinish: boolean;
   poseOverride: { x: number; y: number; theta: number } | null;
   crop: { left_pct: number; top_pct: number; right_pct: number; bottom_pct: number }; // trimmed off each edge
+  // Angled photo: the mat's corners (top-left, top-right, bottom-right, bottom-left) in % of the image width and
+  // height. When set, the photo is flattened to top-down before import and the crop is not used. Optional in files.
+  corners?: [number, number][] | null;
 }
 
 export interface AppSettings {
@@ -46,6 +50,7 @@ export const DEFAULT_TRACK_SETUP: TrackSetup = {
   swapStartFinish: false,
   poseOverride: null,
   crop: { left_pct: 0, top_pct: 0, right_pct: 0, bottom_pct: 0 },
+  corners: null,
 };
 
 export const DEFAULTS: AppSettings = {
@@ -166,6 +171,18 @@ function badNumbers(base: unknown, v: unknown, path = ''): string | null {
   return null;
 }
 
+// Corners from a file: null, or four [x, y] pairs in % (−50…150, so a corner may lie a little outside the photo).
+export function checkCorners(v: unknown): [number, number][] | null {
+  if (v === null || v === undefined) return null;
+  if (!Array.isArray(v) || v.length !== 4 || !v.every((p) => Array.isArray(p) && p.length === 2 && p.every((n) => typeof n === 'number' && Number.isFinite(n) && n >= -50 && n <= 150))) {
+    throw new Error('The track corners must be four [x, y] pairs in % of the image (from −50 to 150).');
+  }
+  const q = v as [number, number][];
+  const problem = quadProblem(q as Quad);
+  if (problem) throw new Error(`The track corners are not usable: ${problem}`);
+  return q.map(([x, y]) => [x, y]);
+}
+
 function checkImage(u: unknown): string {
   if (typeof u !== 'string' || !/^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(u)) throw new Error('The embedded track image is not a PNG, JPEG or WebP data URL.');
   return u;
@@ -188,6 +205,7 @@ export function parseImport(text: string): Imported {
     const settings = merge(DEFAULTS, j.settings);
     const bad = badNumbers(DEFAULTS, settings);
     if (bad) throw new Error(`The project file has an invalid number at ${bad}.`);
+    settings.track.corners = checkCorners(settings.track.corners);
     const problems = profileProblems(settings.profile);
     if (problems.length) throw new Error(`The project's robot has values out of range: ${problems.slice(0, 5).join(' ')}`);
     const runs = Array.isArray(j.runs) ? (j.runs as RunSummary[]).filter((r) => isObj(r) && typeof r.label === 'string').slice(0, 200) : [];
@@ -198,6 +216,7 @@ export function parseImport(text: string): Imported {
     const setup = merge(DEFAULT_TRACK_SETUP, j.setup);
     const bad = badNumbers(DEFAULT_TRACK_SETUP, setup);
     if (bad) throw new Error(`The track file has an invalid number at ${bad}.`);
+    setup.corners = checkCorners(setup.corners);
     return { kind: 'track', value: { lfsim: 'track', version: 1, setup, image: checkImage(j.image) } };
   }
   if (j.version === 1 && typeof j.wheelbase_mm === 'number') {
