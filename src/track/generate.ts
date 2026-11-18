@@ -1,38 +1,43 @@
-// Seeded Robo-Run maze generator. A maze is carved on a coarse lattice of junction points (a spanning tree plus a few
-// extra edges for loops), then each edge and junction is drawn with a feature seen on real Shaastra mazes: zigzags,
-// arcs, S-bends, rectangle / oval / diamond / triangle loops, dead-end stubs and combs, rings with spokes, rounded
-// corners and diagonals. The drawing is checked for unintended contact between lines, then rasterised at 2 mm/px.
-// Pure TypeScript (no Node, no DOM): the same seed always gives the same maze.
+// Seeded Robo-Run maze generator, modelled on real Shaastra mazes: one long route winds band by band from the start
+// corner to the finish at the far end, with a few side branches (dead ends) and shortcuts (loops), and a budget of
+// features measured on reference mazes — a zigzag or two, a square-wave meander, S-bend, half-circle bumps, a few
+// rectangles, a circle (sometimes with spokes), a triangle chain, a diamond or V, combs and stubs, diagonals and rounded
+// corners — on plenty of plain line and white space. The drawing is checked for unintended contact between lines, then
+// rasterised at 2 mm/px. Pure TypeScript (no Node, no DOM): the same seed always gives the same maze.
 
 import { Rng } from '../sim/sensors';
 
 export type Feature =
   | 'straight' | 'zigzag' | 'arc' | 'sbend' | 'box' | 'boxSide' | 'oval' | 'diamond' | 'triangles'
-  | 'stub' | 'comb' | 'ring' | 'curve' | 'diagonal';
+  | 'stub' | 'comb' | 'ring' | 'curve' | 'diagonal' | 'meander';
 
-export const FEATURES: Feature[] = ['straight', 'zigzag', 'arc', 'sbend', 'box', 'boxSide', 'oval', 'diamond', 'triangles', 'stub', 'comb', 'ring', 'curve', 'diagonal'];
+export const FEATURES: Feature[] = ['straight', 'zigzag', 'arc', 'sbend', 'meander', 'box', 'boxSide', 'oval', 'diamond', 'triangles', 'stub', 'comb', 'ring', 'curve', 'diagonal'];
+
+// Feature counts on the reference mazes (lab/references/features.json), per maze, as [min, max] ranges the generator
+// draws from (a little above the references, as asked). Edge features sit on route segments; ring and curve on corners
+// and junctions; diagonal = a corner cut at 45°.
+export const REFERENCE_BUDGET: Partial<Record<Feature, [number, number]>> = {
+  zigzag: [1, 2], meander: [0, 1], sbend: [0, 1], arc: [1, 2], box: [4, 7], boxSide: [1, 2], oval: [0, 1], diamond: [0, 1],
+  triangles: [0, 1], comb: [1, 2], stub: [2, 4], ring: [1, 2], curve: [1, 3], diagonal: [2, 5],
+};
 
 export interface GenOptions {
   seed: number;
   size_m: number;          // mat side (Robo-Run 2027: 16 × 25 cm = 4 m; 2026: 10 × 25 cm = 2.5 m)
   cell_m: number;          // rulebook unit square (start square sits in the corner cell)
   lineWidth_cm: [number, number]; // drawn width is chosen per maze in this range
-  lattice?: number;        // junction lattice points per side (default: from the mat size, 1.5 cells apart)
-  finishEdgeP: number;     // chance the finish is at the far end of the mat (the rest: somewhere inside)
-  dropFrac: [number, number]; // share of lattice points left unused
-  loopFrac: [number, number]; // extra edges (loops) per used point
-  diagonalP: number;       // chance a tree edge may be a diagonal
-  // Relative weights of edge features (an edge that cannot fit its feature is drawn straight).
-  edgeMix: Partial<Record<Feature, number>>;
-  ringP: number;           // chance a junction (3+ lines) is drawn as a ring
-  curveP: number;          // chance a 90° bend is rounded
+  lattice?: number;        // route lattice points per side (default: from the mat size, 2 cells apart)
+  finish: { corner: number; edge: number; inside: number }; // where the finish goes (relative weights)
+  budget: Partial<Record<Feature, [number, number]>>; // features per maze
+  branches: [number, number];  // side branches (dead ends) off the route
+  shortcuts: [number, number]; // links between route parts (loops: more than one way to the finish)
+  merge: number;           // chance two straight route segments in line are drawn as one long segment (room for features)
   squareSide_m: number;    // start / finish square side (assumption: 20 cm, inside a 25 cm cell)
 }
 
 export const DEFAULT_GEN: Omit<GenOptions, 'seed'> = {
-  size_m: 4, cell_m: 0.25, lineWidth_cm: [3, 4], finishEdgeP: 0.8, dropFrac: [0.0, 0.08], loopFrac: [0.3, 0.55], diagonalP: 0.12,
-  edgeMix: { straight: 2.2, zigzag: 1.1, arc: 0.9, sbend: 1.1, box: 1.1, boxSide: 0.9, oval: 0.7, diamond: 0.8, triangles: 0.7, stub: 1.4, comb: 0.8 },
-  ringP: 0.25, curveP: 0.7, squareSide_m: 0.2,
+  size_m: 4, cell_m: 0.25, lineWidth_cm: [3, 4], finish: { corner: 0.7, edge: 0.2, inside: 0.1 },
+  budget: REFERENCE_BUDGET, branches: [4, 7], shortcuts: [3, 5], merge: 0.45, squareSide_m: 0.2,
 };
 
 type P2 = [number, number];
@@ -45,99 +50,135 @@ export interface GeneratedMaze {
   start: { x: number; y: number; side: number };
   finish: { x: number; y: number; side: number };
   corner: 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right';
-  features: Partial<Record<Feature, number>>; // count of each feature drawn
+  features: Partial<Record<Feature | 'ringSpokes', number>>; // count of each feature drawn (ringSpokes: rings with spokes)
   nodes: number; edges: number; loops: number;
   attempts: number;        // feature downgrades needed to clear contacts
 }
 
 // ---------------------------------------------------------------- lattice carving
 
-interface LEdge { a: number; b: number; diag: boolean }
+interface LEdge { a: number; b: number; diag: boolean; long?: boolean }
 
-export const latticeFor = (size_m: number, cell_m: number) => Math.round((size_m - cell_m) / (1.5 * cell_m)) + 1;
+// Route points two rulebook squares apart (room for features at the size seen on real mazes).
+export const latticeFor = (size_m: number, cell_m: number) => Math.round((size_m - cell_m) / (2 * cell_m)) + 1;
 
-function carve(o: GenOptions, rng: Rng) {
+const ri = (rng: Rng, r: [number, number]) => r[0] + Math.floor(rng.next() * (r[1] - r[0] + 1));
+
+// The route: from the start corner (0, 0) along horizontal bands of 2–3 lattice rows, left to right then right to left,
+// stepping up or down inside a band now and then, down to the next band at the end of each. It ends on the bottom row
+// (usually at a bottom corner, sometimes along the bottom edge), or the finish goes at the end of a branch inside.
+function carveRoute(o: GenOptions, rng: Rng) {
   const K = o.lattice ?? latticeFor(o.size_m, o.cell_m);
   const id = (i: number, j: number) => j * K + i;
-  const keep = new Array(K * K).fill(true);
-  const drop = o.dropFrac[0] + rng.next() * (o.dropFrac[1] - o.dropFrac[0]);
-  for (let n = 0; n < K * K; n += 1) if (n !== id(0, 0) && n !== id(1, 0) && n !== id(0, 1) && rng.next() < drop) keep[n] = false;
-  // The finish is usually at the far end of the mat (the bottom edge, start at the top-left), most often near one of the
-  // two bottom corners, as on Shaastra mazes; otherwise it is placed inside the maze. It is kept out of the tree and
-  // joined by a single line at the end, so it has one pathway.
-  let edgeFinish = -1;
-  if (rng.next() < o.finishEdgeP) {
-    const near = rng.next() < 0.7;
-    const cols = near ? [0, 1, 2, K - 3, K - 2, K - 1] : Array.from({ length: K }, (_, i) => i);
-    edgeFinish = id(cols[Math.floor(rng.next() * cols.length)], K - 1);
-    keep[edgeFinish] = true;
+  const col = (n: number) => n % K, row = (n: number) => Math.floor(n / K);
+  const bands: [number, number][] = [];
+  for (let r = 0; r < K;) { let h = rng.next() < 0.5 ? 2 : 3; if (K - (r + h) === 1) h += 1; if (r + h > K) h = K - r; bands.push([r, r + h - 1]); r += h; }
+  const fw = o.finish.corner + o.finish.edge + o.finish.inside, fr = rng.next() * fw;
+  const finishKind = fr < o.finish.corner ? 'corner' : fr < o.finish.corner + o.finish.edge ? 'edge' : 'inside';
+  const path: number[] = [id(0, 0)];
+  const used = new Set<number>(path);
+  let c = 0, r = 0, dir = 1, vertCol = -1;
+  const go = (i: number, j: number) => { c = i; r = j; const n = id(i, j); path.push(n); used.add(n); };
+  for (let b = 0; b < bands.length; b += 1) {
+    const [r0, r1] = bands[b];
+    const last = b === bands.length - 1;
+    const endCol = dir > 0 ? K - 1 : 0;
+    const stopCol = last && finishKind === 'edge' ? (dir > 0 ? 2 + Math.floor(rng.next() * (K - 4)) : 1 + Math.floor(rng.next() * (K - 4))) : endCol;
+    while (c !== stopCol) {
+      // A step up or down inside the band (at most one vertical run per column, so the route never meets itself).
+      if (path.length > 1 && r1 > r0 && c !== vertCol && rng.next() < 0.3) {
+        const t = r0 + Math.floor(rng.next() * (r1 - r0 + 1));
+        if (t !== r) vertCol = c;
+        while (r !== t) go(c, r + Math.sign(t - r));
+      }
+      go(c + dir, r);
+    }
+    if (last) { while (r < K - 1) go(c, r + 1); break; }
+    const [n0, n1] = bands[b + 1];
+    const t = n0 + Math.floor(rng.next() * (n1 - n0 + 1));
+    vertCol = c;
+    while (r !== t) go(c, r + 1);
+    dir = -dir;
   }
-  const neighbours = (n: number, diag: boolean) => {
-    const i = n % K, j = Math.floor(n / K), out: { m: number; diag: boolean }[] = [];
-    const d4 = [[1, 0], [-1, 0], [0, 1], [0, -1]], dd = [[1, 1], [-1, 1], [1, -1], [-1, -1]];
-    for (const [a, b] of d4) { const x = i + a, y = j + b; if (x >= 0 && y >= 0 && x < K && y < K) out.push({ m: id(x, y), diag: false }); }
-    if (diag) for (const [a, b] of dd) { const x = i + a, y = j + b; if (x >= 0 && y >= 0 && x < K && y < K) out.push({ m: id(x, y), diag: true }); }
-    return out.filter((q) => keep[q.m] && q.m !== id(0, 0) && q.m !== edgeFinish);
-  };
-  const cellOf = (a: number, b: number) => Math.min(a % K, b % K) + Math.min(Math.floor(a / K), Math.floor(b / K)) * K;
-  const diagCells = new Set<number>();
   const edges: LEdge[] = [];
   const has = new Set<string>();
   const key = (a: number, b: number) => (a < b ? `${a}-${b}` : `${b}-${a}`);
-  const add = (a: number, b: number, diag: boolean) => { edges.push({ a, b, diag }); has.add(key(a, b)); if (diag) diagCells.add(cellOf(a, b)); };
+  const add = (a: number, b: number, diag = false) => { edges.push({ a, b, diag }); has.add(key(a, b)); };
+  for (let i = 1; i < path.length; i += 1) add(path[i - 1], path[i]);
+  const idx = new Map(path.map((n, i) => [n, i]));
+  let finish = path[path.length - 1];
+  const start = path[0];
+  const nb4 = (n: number) => [[1, 0], [-1, 0], [0, 1], [0, -1]].map(([a, b]) => [col(n) + a, row(n) + b]).filter(([x, y]) => x >= 0 && y >= 0 && x < K && y < K).map(([x, y]) => id(x, y));
 
-  // Start (lattice corner) → its only neighbour; the start square must have a single exit.
-  const first = rng.next() < 0.5 ? id(1, 0) : id(0, 1);
-  add(id(0, 0), first, false);
-  // Randomised depth-first spanning tree from there.
-  const seen = new Set<number>([id(0, 0), first]);
-  const stack = [first];
-  while (stack.length) {
-    const c = stack[stack.length - 1];
-    const nb = neighbours(c, rng.next() < o.diagonalP).filter((q) => !seen.has(q.m) && !(q.diag && diagCells.has(cellOf(c, q.m))));
-    if (!nb.length) { stack.pop(); continue; }
-    // Prefer orthogonal moves; diagonals stay a minority.
-    const q = nb[Math.floor(rng.next() * nb.length)];
-    add(c, q.m, q.diag); seen.add(q.m); stack.push(q.m);
+  // Inside finish: at the end of a short branch from the middle of the route; the route's own end becomes a dead end.
+  if (finishKind === 'inside') {
+    const mids = path.filter((n, i) => i > path.length * 0.4 && i < path.length * 0.8);
+    let placed = false;
+    for (let t = 0; t < 30 && !placed; t += 1) {
+      const p = mids[Math.floor(rng.next() * mids.length)];
+      const q = nb4(p).filter((m) => !used.has(m) && nb4(m).every((x) => x === p || !used.has(x)));
+      if (!q.length) continue;
+      const f = q[Math.floor(rng.next() * q.length)];
+      add(p, f); used.add(f); finish = f; placed = true;
+    }
   }
-  const used = [...seen];
+  const protectedNodes = new Set([start, path[1], finish]);
   const degree = (n: number) => edges.filter((e) => e.a === n || e.b === n).length;
-  // Hops from the start, for choosing a far finish.
-  const hops = new Map<number, number>([[id(0, 0), 0]]);
-  const q: number[] = [id(0, 0)];
-  while (q.length) { const c = q.shift()!; for (const e of edges) { const m = e.a === c ? e.b : e.b === c ? e.a : -1; if (m >= 0 && !hops.has(m)) { hops.set(m, hops.get(c)! + 1); q.push(m); } } }
-  let finish: number;
-  if (edgeFinish >= 0) {
-    const i = edgeFinish % K;
-    const opts = [[i, K - 2], [i - 1, K - 1], [i + 1, K - 1]].filter(([x, y]) => x >= 0 && x < K && seen.has(id(x, y))).map(([x, y]) => id(x, y));
-    if (!opts.length) return null;
-    add(opts[Math.floor(rng.next() * opts.length)], edgeFinish, false);
-    seen.add(edgeFinish); used.push(edgeFinish);
-    finish = edgeFinish;
-  } else {
-    const leaves = used.filter((n) => n !== id(0, 0) && n !== first && degree(n) === 1).sort((a, b) => hops.get(b)! - hops.get(a)!);
-    if (!leaves.length) return null;
-    const pool = leaves.slice(0, Math.max(1, Math.ceil(leaves.length / 3)));
-    finish = pool[Math.floor(rng.next() * pool.length)];
-  }
-  // Loops: extra edges between used points, never touching the start or the finish.
-  const loopFrac = o.loopFrac[0] + rng.next() * (o.loopFrac[1] - o.loopFrac[0]);
-  const want = Math.round(loopFrac * used.length);
-  const cands: LEdge[] = [];
-  for (const a of used) for (const nb of neighbours(a, true)) {
-    const b = nb.m;
-    if (b <= a || !seen.has(b) || has.has(key(a, b)) || a === finish || b === finish || a === id(0, 0) || b === id(0, 0)) continue;
-    if (nb.diag && rng.next() > 0.3) continue;
-    cands.push({ a, b, diag: nb.diag });
-  }
+  // Shortcuts: link two route points that are lattice neighbours but far apart along the route (a loop).
+  const wantS = ri(rng, o.shortcuts);
   let loops = 0;
-  while (loops < want && cands.length) {
-    const k = Math.floor(rng.next() * cands.length);
-    const c = cands.splice(k, 1)[0];
-    if (has.has(key(c.a, c.b)) || (c.diag && diagCells.has(cellOf(c.a, c.b)))) continue;
-    add(c.a, c.b, c.diag); loops += 1;
+  const cand: [number, number][] = [];
+  for (const p of path) for (const q of nb4(p)) if (idx.has(q) && p < q && Math.abs(idx.get(p)! - idx.get(q)!) >= 4 && !has.has(key(p, q)) && !protectedNodes.has(p) && !protectedNodes.has(q)) cand.push([p, q]);
+  // Prefer shortcuts that skip a long stretch of the route (between bands): they make the finish hard to find by
+  // simply following a wall, as the rulebook asks, and give real alternative routes.
+  cand.sort((x, y) => Math.abs(idx.get(y[0])! - idx.get(y[1])!) - Math.abs(idx.get(x[0])! - idx.get(x[1])!));
+  const top = cand.slice(0, Math.max(wantS * 4, Math.ceil(cand.length / 3)));
+  while (loops < wantS && top.length) { const [p, q] = top.splice(Math.floor(rng.next() * top.length), 1)[0]; if (degree(p) < 3 && degree(q) < 3) { add(p, q); loops += 1; } }
+  // Branches: dead ends of 1–3 segments into empty lattice points.
+  const wantB = ri(rng, o.branches);
+  for (let b = 0, t = 0; b < wantB && t < 60; t += 1) {
+    const p = path[2 + Math.floor(rng.next() * (path.length - 3))];
+    if (protectedNodes.has(p) || degree(p) >= 3) continue;
+    let cur = p, steps = 1 + Math.floor(rng.next() * 3), made = 0;
+    while (steps-- > 0) {
+      const q = nb4(cur).filter((m) => !used.has(m));
+      if (!q.length) break;
+      const nx = q[Math.floor(rng.next() * q.length)];
+      add(cur, nx); used.add(nx); cur = nx; made += 1;
+    }
+    if (made) b += 1;
   }
-  return { K, edges, start: id(0, 0), finish, used, loops };
+  // Diagonal corner cuts: a route corner a–m–b (one horizontal, one vertical segment, m plain) becomes one 45° line a–b.
+  const wantD = ri(rng, o.budget.diagonal ?? [0, 0]);
+  const diagCells = new Set<string>();
+  let diagonals = 0;
+  for (let t = 0; t < 200 && diagonals < wantD; t += 1) {
+    const m = path[2 + Math.floor(rng.next() * Math.max(1, path.length - 4))];
+    if (protectedNodes.has(m)) continue;
+    const ks = edges.map((e, k) => (e.a === m || e.b === m ? k : -1)).filter((k) => k >= 0);
+    if (ks.length !== 2) continue;
+    const [e1, e2] = ks.map((k) => edges[k]);
+    if (e1.diag || e2.diag) continue;
+    const a = e1.a === m ? e1.b : e1.a, b = e2.a === m ? e2.b : e2.a;
+    if (col(a) === col(b) || row(a) === row(b) || protectedNodes.has(a) || protectedNodes.has(b)) continue;
+    const cell = `${Math.min(col(a), col(b))},${Math.min(row(a), row(b))}`;
+    if (diagCells.has(cell) || has.has(key(a, b))) continue;
+    for (const k of ks.sort((x, y) => y - x)) edges.splice(k, 1);
+    add(a, b, true); diagCells.add(cell); used.delete(m); diagonals += 1;
+  }
+  // Long segments: two straight route segments in line through a plain point are drawn as one (room for long features).
+  for (const m of [...used]) {
+    if (protectedNodes.has(m) || rng.next() > o.merge) continue;
+    const ks = edges.map((e, k) => (e.a === m || e.b === m ? k : -1)).filter((k) => k >= 0);
+    if (ks.length !== 2) continue;
+    const [e1, e2] = ks.map((k) => edges[k]);
+    if (e1.diag || e2.diag || (e1 as LEdge & { long?: boolean }).long || (e2 as LEdge & { long?: boolean }).long) continue;
+    const a = e1.a === m ? e1.b : e1.a, b = e2.a === m ? e2.b : e2.a;
+    if (!(col(a) === col(b) || row(a) === row(b)) || protectedNodes.has(a) || protectedNodes.has(b)) continue;
+    for (const k of ks.sort((x, y) => y - x)) edges.splice(k, 1);
+    edges.push({ a, b, diag: false, long: true } as LEdge); used.delete(m);
+  }
+  return { K, edges, start, finish, used: [...used], loops, diagonals };
 }
 
 // ---------------------------------------------------------------- geometry helpers
@@ -155,14 +196,16 @@ type Local = P2[][];
 const range = (rng: Rng, a: number, b: number) => a + rng.next() * (b - a);
 const side = (rng: Rng) => (rng.next() < 0.5 ? 1 : -1);
 
-function buildEdge(f: Feature, L: number, rng: Rng, across: number): Local | null {
+function buildEdge(f: Feature, L: number, rng: Rng, across: number, sc = 1): Local | null {
+  // Feature sizes scale with the route spacing (sc = 1 at 37.5 cm); clearance limits stay absolute.
+  const R = (lo: number, hi: number): number => range(rng, lo * sc, hi * sc);
   // `across` = free room on each side of the edge (m) before another lattice edge.
   const lead = 0.06;
   const s = side(rng);
   switch (f) {
     case 'straight': case 'diagonal': return [[[0, 0], [L, 0]]];
     case 'zigzag': {
-      const M = L - 2 * lead, a = Math.min(range(rng, 0.06, 0.11), across - 0.06), k = Math.floor(M / range(rng, 0.09, 0.13));
+      const M = L - 2 * lead, a = Math.min(R(0.08, 0.13), across - 0.06), k = Math.floor(M / R(0.09, 0.13));
       if (k < 2 || a < 0.05) return null;
       const pts: P2[] = [[0, 0], [lead, 0]];
       for (let i = 1; i < 2 * k; i += 1) pts.push([lead + (M * i) / (2 * k), i % 2 ? a * s : 0]);
@@ -170,12 +213,25 @@ function buildEdge(f: Feature, L: number, rng: Rng, across: number): Local | nul
       return [pts];
     }
     case 'arc': {
-      const r = Math.min(range(rng, 0.05, 0.09), across - 0.05), m = L / 2;
+      const r = Math.min(R(0.05, 0.09), across - 0.05), m = L / 2;
       if (r < 0.045 || m - r < lead) return null;
       return [[[0, 0], ...arcPts(m, 0, r, Math.PI, s > 0 ? 0 : 2 * Math.PI).map(([x, y]) => [x, s > 0 ? Math.abs(y) : -Math.abs(y)] as P2), [L, 0]]];
     }
+    case 'meander': { // square wave: up, across, down past the line, across, back (sample maze, top row)
+      const w = R(0.11, 0.15), a = Math.min(R(0.09, 0.13), across - 0.05), m = rng.next() < 0.5 ? 2 : 3;
+      const x0 = (L - m * w) / 2;
+      if (x0 < lead || a < 0.07) return null;
+      const pts: P2[] = [[0, 0], [x0, 0]];
+      for (let k = 0; k <= m; k += 1) {
+        const yPrev = k === 0 ? 0 : s * a * (k % 2 ? 1 : -1);
+        const yNext = k === m ? 0 : s * a * (k % 2 ? -1 : 1);
+        pts.push([x0 + k * w, yPrev], [x0 + k * w, yNext]);
+      }
+      pts.push([L, 0]);
+      return [pts];
+    }
     case 'sbend': {
-      const w = range(rng, 0.085, 0.11), a = Math.min(range(rng, 0.06, 0.09), across - w / 2 - 0.05), m = rng.next() < 0.5 ? 2 : 3;
+      const w = R(0.085, 0.11), a = Math.min(R(0.06, 0.09), across - w / 2 - 0.05), m = rng.next() < 0.5 ? 2 : 3;
       const x0 = (L - m * w) / 2;
       if (x0 < lead || a < 0.05) return null;
       const pts: P2[] = [[0, 0], [x0, 0]];
@@ -195,8 +251,8 @@ function buildEdge(f: Feature, L: number, rng: Rng, across: number): Local | nul
     }
     case 'box': case 'boxSide': case 'oval': {
       // A loop with no line through it (box, oval) may be flatter than one with a straight inside (boxSide).
-      const bl = f === 'oval' ? range(rng, 0.15, 0.2) : range(rng, 0.13, 0.2);
-      const h = Math.min(f === 'boxSide' ? range(rng, 0.09, 0.12) : range(rng, 0.06, 0.1), across - 0.05);
+      const bl = f === 'oval' ? R(0.15, 0.2) : R(0.15, 0.24);
+      const h = Math.min(f === 'boxSide' ? R(0.09, 0.12) : R(0.07, 0.11), across - 0.05);
       const x1 = (L - bl) / 2, x2 = x1 + bl;
       if (x1 < 0.08 || h < (f === 'boxSide' ? 0.085 : 0.058)) return null;
       const out: Local = [[[0, 0], [x1, 0]], [[x2, 0], [L, 0]]];
@@ -212,7 +268,7 @@ function buildEdge(f: Feature, L: number, rng: Rng, across: number): Local | nul
     case 'diamond': case 'triangles': {
       // Triangles: one arrow-head, or two in a row when the edge is long enough (the back of a triangle must stay
       // clear of lines at the junctions).
-      const bl = f === 'triangles' ? range(rng, 0.1, 0.13) : range(rng, 0.12, 0.16), gap = 0.035, h = Math.min(range(rng, 0.07, 0.1), across - 0.05);
+      const bl = f === 'triangles' ? R(0.1, 0.13) : R(0.12, 0.16), gap = 0.035, h = Math.min(R(0.07, 0.1), across - 0.05);
       const n = f === 'triangles' && 2 * bl + gap <= L - 0.2 ? 2 : 1;
       const total = n * bl + (n - 1) * gap;
       let x1 = (L - total) / 2;
@@ -230,10 +286,10 @@ function buildEdge(f: Feature, L: number, rng: Rng, across: number): Local | nul
     }
     case 'stub': case 'comb': {
       const n = f === 'comb' ? 2 + Math.floor(rng.next() * 3) : 1;
-      const sl = Math.min(range(rng, 0.07, 0.13), across - 0.06), sp = range(rng, 0.085, 0.11);
+      const sl = Math.min(R(0.07, 0.13), across - 0.06), sp = R(0.085, 0.11);
       const ang = f === 'stub' && rng.next() < 0.35 ? Math.PI / 4 : Math.PI / 2;
       const span = (n - 1) * sp;
-      let x = (L - span) / 2 + (f === 'stub' ? range(rng, -0.05, 0.05) : 0);
+      let x = (L - span) / 2 + (f === 'stub' ? R(-0.05, 0.05) : 0);
       if (x < lead + 0.02 || x + span > L - lead - 0.02 || sl < 0.06) return null;
       const out: Local = [];
       let prev = 0;
@@ -301,20 +357,10 @@ function contacts(els: GenElement[], minSep: number, joinR: number, size: number
 
 // ---------------------------------------------------------------- the generator
 
-function pick<T extends string>(rng: Rng, w: Partial<Record<T, number>>): T {
-  const ent = Object.entries(w) as [T, number][];
-  const tot = ent.reduce((a, [, v]) => a + Math.max(0, v), 0);
-  let r = rng.next() * tot;
-  for (const [k, v] of ent) { r -= Math.max(0, v); if (r <= 0) return k; }
-  return ent[0][0];
-}
-
 export function generateMaze(opts: Partial<GenOptions> & { seed: number }): GeneratedMaze {
   const o: GenOptions = { ...DEFAULT_GEN, ...opts };
   const rng = new Rng(Math.imul(o.seed >>> 0, 2654435761) ^ 0x9e3779b9);
-  let lat = carve(o, rng);
-  for (let t = 0; !lat && t < 20; t += 1) lat = carve(o, rng);
-  if (!lat) throw new Error('Could not carve a maze with a finish leaf.');
+  const lat = carveRoute(o, rng);
   const lw = (o.lineWidth_cm[0] + rng.next() * (o.lineWidth_cm[1] - o.lineWidth_cm[0])) / 100;
   const K = lat.K;
   const off = o.cell_m / 2;
@@ -322,36 +368,62 @@ export function generateMaze(opts: Partial<GenOptions> & { seed: number }): Gene
   const pos = (n: number): P2 => [off + (n % K) * pitch, off + Math.floor(n / K) * pitch];
   const inc = new Map<number, number[]>(); // node → edge indices
   lat.edges.forEach((e, k) => { for (const n of [e.a, e.b]) { const a = inc.get(n); if (a) a.push(k); else inc.set(n, [k]); } });
-  const dirFrom = (n: number, k: number): P2 => { const e = lat!.edges[k]; const m = e.a === n ? e.b : e.a; const d = sub(pos(m), pos(n)); const l = len(d); return [d[0] / l, d[1] / l]; };
+  const dirFrom = (n: number, k: number): P2 => { const e = lat.edges[k]; const m = e.a === n ? e.b : e.a; const d = sub(pos(m), pos(n)); const l = len(d); return [d[0] / l, d[1] / l]; };
 
-  // Per-junction treatment and per-edge feature, chosen once; contacts downgrade them to plain drawings.
-  const nodeKind = new Map<number, { kind: 'plain' | 'ring' | 'curve'; r: number; spokes: number[] }>();
-  for (const [n, ks] of inc) {
-    const special = n === lat.start || n === lat.finish;
-    if (!special && ks.length >= 3 && rng.next() < o.ringP) {
-      const R = range(rng, 0.065, 0.1);
-      const used = ks.map((k) => Math.atan2(dirFrom(n, k)[1], dirFrom(n, k)[0]));
-      const spokes: number[] = [];
-      const nsp = Math.floor(rng.next() * 4);
-      for (let t = 0; t < 12 && spokes.length < nsp; t += 1) {
-        const a = rng.next() * 2 * Math.PI;
-        const clear = [...used, ...spokes].every((u) => Math.abs(((a - u + 3 * Math.PI) % (2 * Math.PI)) - Math.PI) > 0.75);
-        if (clear) spokes.push(a);
-      }
-      nodeKind.set(n, { kind: 'ring', r: R, spokes });
-    } else if (!special && ks.length === 2) {
-      const d1 = dirFrom(n, ks[0]), d2 = dirFrom(n, ks[1]);
-      const perp = Math.abs(d1[0] * d2[0] + d1[1] * d2[1]) < 0.05;
-      nodeKind.set(n, perp && rng.next() < o.curveP ? { kind: 'curve', r: range(rng, 0.06, 0.13), spokes: [] } : { kind: 'plain', r: 0, spokes: [] });
-    } else nodeKind.set(n, { kind: 'plain', r: 0, spokes: [] });
-  }
-  const edgeFeat: Feature[] = lat.edges.map((e) => {
-    // The lines out of the start square and into the finish square stay plain.
-    if (e.a === lat!.start || e.b === lat!.start || e.a === lat!.finish || e.b === lat!.finish) return e.diag ? 'diagonal' : 'straight';
-    const f = pick(rng, o.edgeMix);
-    if (e.diag) return f === 'zigzag' || f === 'stub' || f === 'arc' ? f : 'diagonal';
-    return f;
-  });
+  // Features by budget: draw a count of each, place them on random route segments (long features on long segments)
+  // and rings / rounded corners on route points. A feature that touches another line is moved once, then dropped.
+  const want = (f: Feature) => ri(rng, o.budget[f] ?? [0, 0]);
+  const shuffle = <T,>(arr: T[]) => { for (let i = arr.length - 1; i > 0; i -= 1) { const j = Math.floor(rng.next() * (i + 1)); [arr[i], arr[j]] = [arr[j], arr[i]]; } return arr; };
+  type NodeKind = { kind: 'plain' | 'ring' | 'curve'; r: number; spokes: number[] };
+  const nodeKind = new Map<number, NodeKind>();
+  for (const [n] of inc) nodeKind.set(n, { kind: 'plain', r: 0, spokes: [] });
+  const special = (n: number) => n === lat.start || n === lat.finish;
+  const makeRing = (n: number, spokes: boolean): NodeKind => {
+    const ks = inc.get(n)!;
+    const used = ks.map((k) => Math.atan2(dirFrom(n, k)[1], dirFrom(n, k)[0]));
+    const sp: number[] = [];
+    const nsp = spokes ? 2 + Math.floor(rng.next() * 2) : 0;
+    for (let t = 0; t < 20 && sp.length < nsp; t += 1) {
+      const a = rng.next() * 2 * Math.PI;
+      if ([...used, ...sp].every((u) => Math.abs(((a - u + 3 * Math.PI) % (2 * Math.PI)) - Math.PI) > 0.75)) sp.push(a);
+    }
+    return { kind: 'ring', r: range(rng, 0.12, 0.16), spokes: sp }; // circles on real mazes are about 30 cm across
+  };
+  const ringSpots = shuffle([...inc.keys()].filter((n) => !special(n) && inc.get(n)!.length >= 2 && inc.get(n)!.length <= 3 && inc.get(n)!.every((k) => !lat.edges[k].diag)));
+  const nRings = want('ring');
+  ringSpots.slice(0, nRings).forEach((n, i) => nodeKind.set(n, makeRing(n, i === 0 && rng.next() < 0.7)));
+  const bends = shuffle([...inc.keys()].filter((n) => {
+    const ks = inc.get(n)!;
+    if (special(n) || nodeKind.get(n)!.kind !== 'plain' || ks.length !== 2) return false;
+    const d1 = dirFrom(n, ks[0]), d2 = dirFrom(n, ks[1]);
+    return Math.abs(d1[0] * d2[0] + d1[1] * d2[1]) < 0.05;
+  }));
+  bends.slice(0, want('curve')).forEach((n) => nodeKind.set(n, { kind: 'curve', r: range(rng, 0.1, 0.18), spokes: [] }));
+  const plain = (k: number): Feature => (lat.edges[k].diag ? 'diagonal' : 'straight');
+  const edgeFeat: Feature[] = lat.edges.map((_, k) => plain(k));
+  const touchesSpecial = (k: number) => { const e = lat.edges[k]; return special(e.a) || special(e.b); };
+  const LONG: Feature[] = ['zigzag', 'triangles', 'meander', 'sbend', 'comb'];
+  const fits = (f: Feature, k: number) => {
+    const e = lat.edges[k];
+    if (e.diag) return f === 'zigzag' || f === 'stub' || f === 'arc';
+    return LONG.includes(f) ? !!e.long || rng.next() < 0.25 : true;
+  };
+  const free = shuffle(lat.edges.map((_, k) => k).filter((k) => !touchesSpecial(k)));
+  const tried = new Map<number, Set<number>>(); // instance → edges tried
+  const instanceAt = new Map<number, number>(); // edge → instance
+  const instFeat: Feature[] = [];
+  const place = (inst: number): boolean => {
+    const f = instFeat[inst], seen = tried.get(inst) ?? new Set<number>();
+    tried.set(inst, seen);
+    const k = free.find((x) => edgeFeat[x] === plain(x) && !seen.has(x) && fits(f, x));
+    if (k === undefined) return false;
+    edgeFeat[k] = f; instanceAt.set(k, inst); seen.add(k);
+    return true;
+  };
+  const order: Feature[] = [];
+  for (const f of FEATURES) if (!['ring', 'curve', 'straight', 'diagonal'].includes(f)) for (let i = want(f); i > 0; i -= 1) order.push(f);
+  // Long features first, so they get the long segments.
+  for (const f of [...order.filter((x) => LONG.includes(x)), ...shuffle(order.filter((x) => !LONG.includes(x)))]) { instFeat.push(f); place(instFeat.length - 1); }
   const edgeSeed = lat.edges.map(() => Math.floor(rng.next() * 2 ** 31));
 
   const build = (): GenElement[] => {
@@ -365,7 +437,7 @@ export function generateMaze(opts: Partial<GenOptions> & { seed: number }): Gene
       const u: P2 = [d[0] / L, d[1] / L], nrm: P2 = [-u[1], u[0]];
       const across = e.diag ? pitch * 0.5 : pitch / 2;
       const r = new Rng(edgeSeed[k] || 1);
-      let loc = L > 0.1 ? buildEdge(edgeFeat[k], L, r, across) : null;
+      let loc = L > 0.1 ? buildEdge(edgeFeat[k], L, r, across, pitch / 0.375) : null;
       if (!loc) { edgeFeat[k] = e.diag ? 'diagonal' : 'straight'; loc = [[[0, 0], [L, 0]]]; }
       for (const pl of loc) els.push({ owner: `e${k}`, pts: pl.map(([x, y]) => [A[0] + u[0] * x + nrm[0] * y, A[1] + u[1] * x + nrm[1] * y] as P2) });
     });
@@ -417,16 +489,21 @@ export function generateMaze(opts: Partial<GenOptions> & { seed: number }): Gene
     if (!bad.size) break;
     if (attempts === 11) throw new Error(`Maze ${o.seed}: lines still touch after downgrading features (${[...bad].join(', ')}).`);
     for (const b of bad) {
-      if (b.startsWith('e')) { const k = Number(b.slice(1)); edgeFeat[k] = lat.edges[k].diag ? 'diagonal' : 'straight'; }
-      else if (b.startsWith('n')) nodeKind.set(Number(b.slice(1)), { kind: 'plain', r: 0, spokes: [] });
+      if (b.startsWith('e')) {
+        const k = Number(b.slice(1));
+        const inst = instanceAt.get(k);
+        edgeFeat[k] = plain(k); instanceAt.delete(k);
+        if (inst !== undefined && (tried.get(inst)?.size ?? 0) < 3) place(inst); // try it on another segment
+      } else if (b.startsWith('n')) nodeKind.set(Number(b.slice(1)), { kind: 'plain', r: 0, spokes: [] });
     }
     els = build();
   }
 
   // Count features as drawn.
-  const features: Partial<Record<Feature, number>> = {};
+  const features: Partial<Record<Feature | 'ringSpokes', number>> = {};
   const bump = (f: Feature) => { features[f] = (features[f] ?? 0) + 1; };
   edgeFeat.forEach((f) => bump(f));
+  for (const nk of nodeKind.values()) if (nk.kind === 'ring' && nk.spokes.length) features.ringSpokes = (features.ringSpokes ?? 0) + 1;
   for (const nk of nodeKind.values()) if (nk.kind !== 'plain') bump(nk.kind);
 
   // Put the start in a random corner (mirror the drawing).

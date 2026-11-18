@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { loadCompetition } from './competition';
 import { generateTrack, checkTrack, trackFromMaze } from './tracks';
-import { generateMaze, renderMaze } from '../../src/track/generate';
+import { generateMaze, renderMaze, REFERENCE_BUDGET, type Feature } from '../../src/track/generate';
 import { buildGraph } from '../../src/track/graph';
 import { loadGridMaze } from '../../src/testutil';
 
@@ -37,4 +37,17 @@ describe('track generator', () => {
     const { track } = trackFromMaze({ ...maze, finish: { ...maze.finish, side: 0 } }, 'nofinish');
     expect(checkTrack(track, buildGraph(track), c).problems.join(' ')).toMatch(/no finish square/);
   }, 60_000);
+
+  it('stays close to the reference mazes: feature counts within the budget, about as many junctions', () => {
+    const junctions: number[] = [];
+    for (let s = 21; s <= 26; s += 1) {
+      const t = generateTrack(s, c);
+      for (const [f, [, hi]] of Object.entries(REFERENCE_BUDGET) as [Feature, [number, number]][]) expect(t.maze.features[f] ?? 0, f).toBeLessThanOrEqual(hi);
+      expect(t.maze.features.ring ?? 0).toBeLessThanOrEqual(2); // real mazes: one or two circles
+      junctions.push(t.check.junctions);
+    }
+    const mean = junctions.reduce((a, b) => a + b, 0) / junctions.length;
+    expect(mean).toBeGreaterThan(18); // the reference has about 25–30 T-junctions plus crossings
+    expect(mean).toBeLessThan(55);
+  }, 300_000);
 });

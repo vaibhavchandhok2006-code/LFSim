@@ -17,7 +17,7 @@ const c = loadCompetition(new URL('../competition/roborun-2026.json', import.met
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lab-set-'));
 const design = designFromRobot(new URL('../examples/rmi-test-rig.robot.json', import.meta.url).pathname, { algorithm: 'tremaux' });
 
-beforeAll(async () => { await makeTrackSet(dir, 'test-set', c, { tune: 2, held: 3 }); }, 300_000);
+beforeAll(async () => { await makeTrackSet(dir, 'test-set', c, { tune: 2, held: 3 }, undefined, 0); }, 600_000);
 
 describe('track sets', () => {
   it('keeps tuning and held-out tracks apart and every track passes the checks', () => {

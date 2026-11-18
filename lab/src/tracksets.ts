@@ -15,7 +15,7 @@ import type { Checkpoint } from './session';
 import { generateTrack, checkTrack, type TrackCheck } from './tracks';
 import { trackStats, type TrackStats } from './stats';
 
-export const GENERATOR_VERSION = 2; // 2: Robo-Run 2027 (4 m mat), finish mostly at the far end, checkpoints // bump when the generator's output for a seed changes
+export const GENERATOR_VERSION = 3; // 3: route-style mazes with a feature budget from the reference mazes (2: 4 m lattice)
 export const HELD_OUT_SEED_BASE = 1_000_000; // held-out seeds start here; tuning seeds start at 1
 
 export type Part = 'tune' | 'held';

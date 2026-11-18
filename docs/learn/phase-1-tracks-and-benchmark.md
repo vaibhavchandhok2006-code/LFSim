@@ -28,7 +28,13 @@ Parts:
 pixel for pixel, so a result can always be checked again. A random-number generator is really a long fixed sequence;
 the seed picks where in it you start.
 
-**Generating a maze.** Points are laid on a 7 × 7 grid. A *spanning tree* joins them all without loops (a random
+**Generating a maze (version 3).** Real Shaastra mazes are one long route that winds from the start corner to the
+finish, band by band, with features on it, a few dead-end branches, a few shortcuts, and a lot of white space. The
+generator does the same, and places a *budget* of features counted by eye on the reference mazes (for example 1–2
+zigzags and 1–2 circles per maze, not six). A test checks every maze stays within that budget. Earlier versions,
+described next, filled a grid and came out far too dense.
+
+**Earlier generator (versions 1–2).** Points are laid on a 7 × 7 grid. A *spanning tree* joins them all without loops (a random
 depth-first walk: go to an unvisited neighbour, back up when stuck). Then a few extra links add loops, because the
 rulebook expects several paths to the finish. Each link is drawn as a feature seen on real Shaastra mazes: zigzag,
 arc, S-bend, rectangle, oval, diamond, triangles, dead-end stub, comb; corners may be rounded and junctions drawn as
