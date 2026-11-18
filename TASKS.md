@@ -1,6 +1,6 @@
 # Tasks
 
-Status (16 Nov 2026): LFSim Lab Phase 0 done. Earlier (15 Nov 2026): v1 implemented, and all 21 defects of the Independent Test Report addressed — 20 fixed and
+Status (18 Nov 2026): LFSim Lab Phase 1 built (sample approval pending). Phase 0 done 16 Nov. Earlier (15 Nov 2026): v1 implemented, and all 21 defects of the Independent Test Report addressed — 20 fixed and
 verified, D2 fixed on clean mazes with a documented limit on the dense Robo-Run sample. 77 automated tests pass;
 browser smoke test passes. Next: reality check against the real robot.
 
@@ -25,9 +25,15 @@ browser smoke test passes. Next: reality check against the real robot.
 ## LFSim Lab (spec: LFSim Lab — Spec v1)
 - [x] Phase 0: command line (`npm run lab`), headless runs identical to the website, setup doctor, Windows setup guide,
       CI on Linux (pull requests and branches)
-- [ ] Phase 1: competition profile, track generator, photo import, track sets, 10-minute session benchmark, what-if report
-      (note: cache the track import and junction graph per track — they take most of a short run's time)
-- [ ] Phase 2–8: see the spec
+- [x] Phase 1: competition profile (rules as data), track generator + rule checker, track sets (300 tuning / 200
+      held-out), full 10-minute session simulation, parallel benchmark with report, live progress page, replay projects,
+      review sheet, photo import from four corners (website + command line)
+- [ ] Phase 1 sign-off: you review ~20 sample tracks (`tracks sheet`) and confirm they look like Shaastra mazes
+- [ ] Ask the organisers: worked example 54 s vs formula 56 s; over what span restarts are counted
+- [ ] Phase 2: real C firmware (ESP-IDF / Arduino) compiled and run in the simulator; Code-mode sessions with switches
+- [ ] Phase 3–8: see the spec
+- Findings for later phases: the current robot with LSRB / Trémaux often drives back into the start square (aborts
+  the run) and explores slowly on dense mazes — work for the algorithm agent (Phase 5)
 
 ## Later versions (not v1)
 - v2: track editor, auto-tuning, share links; better junction reading at dense features. v3: 3D view.

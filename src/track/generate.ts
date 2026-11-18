@@ -29,8 +29,8 @@ export interface GenOptions {
 }
 
 export const DEFAULT_GEN: Omit<GenOptions, 'seed'> = {
-  size_m: 2.5, cell_m: 0.25, lineWidth_cm: [3, 4], lattice: 7, dropFrac: [0.0, 0.1], loopFrac: [0.25, 0.45], diagonalP: 0.15,
-  edgeMix: { straight: 2.6, zigzag: 1.1, arc: 0.9, sbend: 0.8, box: 1.1, boxSide: 0.9, oval: 0.6, diamond: 0.8, triangles: 0.6, stub: 1.3, comb: 0.7 },
+  size_m: 2.5, cell_m: 0.25, lineWidth_cm: [3, 4], lattice: 7, dropFrac: [0.0, 0.08], loopFrac: [0.3, 0.55], diagonalP: 0.12,
+  edgeMix: { straight: 2.2, zigzag: 1.1, arc: 0.9, sbend: 1.1, box: 1.1, boxSide: 0.9, oval: 0.7, diamond: 0.8, triangles: 0.7, stub: 1.4, comb: 0.8 },
   ringP: 0.25, curveP: 0.7, squareSide_m: 0.2,
 };
 
@@ -171,9 +171,11 @@ function buildEdge(f: Feature, L: number, rng: Rng, across: number): Local | nul
       return [pts];
     }
     case 'box': case 'boxSide': case 'oval': {
-      const bl = range(rng, 0.13, 0.2), h = Math.min(range(rng, 0.09, 0.12), across - 0.05);
+      // A loop with no line through it (box, oval) may be flatter than one with a straight inside (boxSide).
+      const bl = f === 'oval' ? range(rng, 0.15, 0.2) : range(rng, 0.13, 0.2);
+      const h = Math.min(f === 'boxSide' ? range(rng, 0.09, 0.12) : range(rng, 0.06, 0.1), across - 0.05);
       const x1 = (L - bl) / 2, x2 = x1 + bl;
-      if (x1 < lead || h < 0.085) return null;
+      if (x1 < 0.08 || h < (f === 'boxSide' ? 0.085 : 0.058)) return null;
       const out: Local = [[[0, 0], [x1, 0]], [[x2, 0], [L, 0]]];
       const loop = (sg: number): P2[] => f === 'oval'
         ? [...arcPts(x1 + h, 0, h, Math.PI, Math.PI + (sg > 0 ? -1 : 1) * (Math.PI / 2)).map(([x, y]) => [x, sg * Math.abs(y)] as P2),
@@ -185,11 +187,13 @@ function buildEdge(f: Feature, L: number, rng: Rng, across: number): Local | nul
       return out;
     }
     case 'diamond': case 'triangles': {
-      const n = f === 'triangles' ? (rng.next() < 0.5 ? 2 : 3) : 1;
-      const bl = range(rng, 0.12, 0.16), gap = 0.05, h = Math.min(range(rng, 0.08, 0.1), across - 0.05);
+      // Triangles: one arrow-head, or two in a row when the edge is long enough (the back of a triangle must stay
+      // clear of lines at the junctions).
+      const bl = f === 'triangles' ? range(rng, 0.1, 0.13) : range(rng, 0.12, 0.16), gap = 0.035, h = Math.min(range(rng, 0.07, 0.1), across - 0.05);
+      const n = f === 'triangles' && 2 * bl + gap <= L - 0.2 ? 2 : 1;
       const total = n * bl + (n - 1) * gap;
       let x1 = (L - total) / 2;
-      if (x1 < lead || h < 0.075) return null;
+      if (x1 < (f === 'triangles' ? 0.1 : lead) || h < 0.065) return null;
       const out: Local = [[[0, 0], [x1, 0]]];
       for (let k = 0; k < n; k += 1) {
         const x2 = x1 + bl;

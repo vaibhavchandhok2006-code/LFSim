@@ -19,3 +19,9 @@ jobs:
       - run: npm run build
       - name: Headless smoke run (LFSim Lab)
         run: npm run lab -- run --track public/samples/roborun-sample.png --seconds 10 --json lab-smoke.json
+      - name: Track set and benchmark smoke run (LFSim Lab Phase 1)
+        run: |
+          npm run lab -- tracks make --out /tmp/ci-set --tune 1 --held 1
+          npm run lab -- tracks check --set /tmp/ci-set
+          npm run lab -- bench --set /tmp/ci-set --limit 1 --variations 1 --workers 0 --out /tmp/ci-res
+          test -f /tmp/ci-res/report.html

@@ -7,7 +7,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { loadCompetition, parseCompetition } from './competition';
-import { makeTrackSet, recheckSet, loadTrackSet, writePng, type Part } from './tracksets';
+import { makeTrackSet, recheckSet, loadTrackSet, writePng, writeSheet, type Part } from './tracksets';
+import { trackStats } from './stats';
+import { buildGraph } from '../../src/track/graph';
 import { designFromRobot, loadDesign } from './design';
 import { runBench, summarise } from './bench';
 import { writeProgress, writeResults } from './report';
@@ -25,6 +27,8 @@ Commands
   run           Run one simulation headless (same engine and results as the website)
   tracks make   Generate a track set (tuning + held-out tracks) from the rulebook
   tracks check  Re-check every track of a set against the rulebook
+  tracks sheet  Review page: sample tracks and the set's statistics beside a reference maze
+                (--set <folder> [--count 20] [--reference <track.png>])
   bench         Run a design over a track set: full 10-minute sessions, report folder
   doctor        Check Node.js, Git, a C compiler and Claude Code on this computer
 
@@ -98,7 +102,7 @@ export async function main(argv: string[]): Promise<number> {
     for (const c of checks) process.stdout.write(`${c.ok ? 'OK     ' : 'MISSING'} ${c.name.padEnd(18)} ${c.found}  — needed for ${c.needed}${c.ok ? '' : `\n        fix: ${c.fix}`}\n`);
     return ok ? 0 : 1;
   }
-  if (cmd === 'tracks make' || cmd === 'tracks check') return tracksCmd(cmd, flags);
+  if (cmd === 'tracks make' || cmd === 'tracks check' || cmd === 'tracks sheet') return tracksCmd(cmd, flags);
   if (cmd === 'bench') return benchCmd(flags);
   if (cmd !== 'run') throw new Error(`Unknown command "${cmd}". Try: npm run lab -- help`);
   const known = new Set(['project', 'track', 'robot', 'mode', 'algorithm', 'seed', 'memory', 'seconds', 'keep-going', 'csv', 'json', 'save-memory', 'chunk', 'corners', 'track-png']);
@@ -150,6 +154,16 @@ function tracksCmd(cmd: string, flags: Map<string, string | true>): number {
     const t0 = Date.now();
     const m = makeTrackSet(out, str(flags, 'name') ?? path.basename(out), c, { tune, held }, (d, t) => { if (d % 10 === 0 || d === t) process.stdout.write(`\r${d}/${t} tracks`); });
     process.stdout.write(`\nwrote ${m.entries.length} tracks to ${out} in ${((Date.now() - t0) / 1000).toFixed(0)} s\n`);
+    return 0;
+  }
+  if (cmd === 'tracks sheet') {
+    onlyFlags(flags, ['set', 'count', 'reference']);
+    const set = str(flags, 'set'); if (!set) throw new Error('--set <folder> is needed.');
+    const count = num(flags, 'count') ?? 20;
+    const ref = str(flags, 'reference') ?? 'public/samples/roborun-sample.png';
+    const { start } = loadInputs({ track: ref });
+    const file = writeSheet(set, count, trackStats(start.track, buildGraph(start.track)));
+    process.stdout.write(`review sheet: ${path.resolve(file)}\n`);
     return 0;
   }
   onlyFlags(flags, ['set', 'part', 'competition']);

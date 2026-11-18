@@ -96,3 +96,25 @@ export function recheckSet(dir: string, c: Competition, part?: Part): { id: stri
   const m = loadTrackSet(dir);
   return m.entries.filter((e) => !part || e.part === part).map((e) => { const t = loadSetTrack(dir, e); return { id: e.id, problems: checkTrack(t, buildGraph(t), c).problems }; });
 }
+
+// A review sheet for approving a generator version (spec F5): sample tracks with their features, and the set's
+// statistics next to the reference maze's.
+export function writeSheet(dir: string, count: number, reference: TrackStats | null): string {
+  const m = loadTrackSet(dir);
+  const pick = m.entries.filter((e) => e.part === 'tune').slice(0, count);
+  const keys: (keyof TrackStats)[] = ['lineLength_m', 'junctions', 'junctions4', 'deadEnds', 'cycles', 'curvedShare', 'shortEdges'];
+  const all = m.entries.map((e) => e.stats);
+  const q = (k: keyof TrackStats, p: number) => { const s = all.map((x) => x[k]).sort((a, b) => a - b); return s[Math.min(s.length - 1, Math.floor(p * (s.length - 1)))]; };
+  const esc = (s: unknown) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!);
+  const html = `<!doctype html><meta charset="utf-8"><title>${esc(m.name)} — review</title>
+<style>body{font:14px system-ui,sans-serif;margin:24px;color:#1d2433}h1{font-size:20px}table{border-collapse:collapse;margin:8px 0 20px}td,th{padding:4px 10px;border-bottom:1px solid #e3e7ee;text-align:left}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:16px}figure{margin:0}img{width:100%;border:1px solid #ccd}figcaption{font-size:12px;color:#556}</style>
+<h1>${esc(m.name)}: ${pick.length} sample tracks for review</h1>
+<p>Generator version ${m.generatorVersion}. Do these look like Robo-Run mazes? Note anything missing or wrong.</p>
+<table><tr><th>Statistic</th><th>Set 10 %</th><th>Set median</th><th>Set 90 %</th><th>Reference</th></tr>
+${keys.map((k) => `<tr><td>${k}</td><td>${q(k, 0.1)}</td><td>${q(k, 0.5)}</td><td>${q(k, 0.9)}</td><td>${reference ? reference[k] : '—'}</td></tr>`).join('')}</table>
+<div class="grid">${pick.map((e) => `<figure><img src="${esc(e.file)}" alt="${esc(e.id)}"><figcaption>${esc(e.id)} · line ${e.lineWidth_cm} cm · ${e.check.junctions} junctions, ${e.check.deadEnds} dead ends, ${e.check.cycles} loops · ${Object.entries(e.features).filter(([f]) => f !== 'straight').map(([f, n]) => `${f} ${n}`).join(', ')}</figcaption></figure>`).join('')}</div>`;
+  const file = path.join(dir, 'sheet.html');
+  fs.writeFileSync(file, html);
+  return file;
+}
