@@ -130,3 +130,16 @@ CSV / PNG / HTML report / GIF (2.0 MB) downloads, dark theme. No page or worker 
 | Website = command line after Phase 1 changes (e2e/headless_match.py) | identical CSV rows | pass (Settings 4,174 rows, Code 4,474 rows) |
 | Speed target (estimate: 50 sessions/min on 8 cores) | ≥ 50/min | 22.1 sessions/min on this 2-core machine (≈ 11 per core); about 80/min expected on 8 cores. Faster after caching the junction graph and the `darkAt` change (4.4 → 11.3 per core, results bit-identical) |
 | What-if report, current robot (RMI test rig profile, Settings mode, Trémaux, default switch ladder), 200 held-out tracks × 3 variations | report | 15.5 % of sessions finish (95 % interval 12.8–18.6 %); median official time 68.6 s (10–90 %: 29.7–124.2 s); median first finish 148 s into the session; 5.0 restarts per session. Runs in failed sessions ended by: operator gave up 999, stopped away from the finish 879, re-entered the start square 929. Clean / uneven light / harsh: 15.0 / 17.0 / 14.5 %. On 12 tracks LSRB: 2 of 12 sessions, Trémaux 4 of 12 |
+
+## Robo-Run 2027 rulebook update — 2026-11-18
+| Check | Expected | Result |
+| --- | --- | --- |
+| 2027 round 1 example: 40 s, 2 line crossings, 3 restarts, 4 adjustments | 68 s | 68 s (test) |
+| 2027 final example: 40 s, 2 crossings, 1 restart, 4 adjustments, 2 blocks uncleared | 108 s | 108 s (test) |
+| 2026 rules still load (10 × 10, N/20 × run time) | 56 s by its formula | pass |
+| Dry run: unscored, restarts/switch changes not counted, memory carries into the actual run | as rulebook | pass (session test) |
+| Switch change in the scored part = 1 adjustment (+3 s) | as rulebook | pass (session test: score = run time + 5 N + 2 r + 3 e) |
+| Checkpoints: run stopped short scores (time + penalties) / C; best by furthest C | as rulebook | pass (session test) |
+| Track set rr-2027: 500 tracks, 4 m mat, all pass the rule checks at generation, 3 checkpoints each | 500 / 500 | pass. Median 129 junctions, 73 m of line, 69 loops; junctions per m² like the reference maze. Finish at the far end in about 80 % of mazes. Made in 1,043 s on 2 workers |
+| Sample tracks look like Shaastra 2027 mazes | your review | **pending** |
+| What-if, RMI test rig, Trémaux, 300 s dry run, 40 held-out 4 m tracks × 3 variations | report | 4.2 % of sessions finish (95 % interval 1.8–9.4 %), median official time 223 s; sessions without a finish reached checkpoint C ≥ 1 in 65 of 115 (C1 36, C2 16, C3 13). Run ends: stopped away 194, re-entry 170, gave up 118. 18 sessions/min on 2 cores |

@@ -12,6 +12,10 @@ Live app: https://vaibhavchandhok2006-code.github.io/LFSim/ · Spec: `docs/LFSim
     track set `lab/tracksets/rr-2027` (300 tuning / 200 held-out, regenerate with `tracks make`, not committed), full
     10-minute session simulation, parallel benchmark with HTML report and replay projects, photo import from four
     corners (website Track tab and `run --corners`). Results in VALIDATION.md.
+  - Updated the same day to the **Shaastra Robo-Run 2027 rulebook** (`lab/competition/roborun-2027.json`): 4 m mat,
+    5 s per line crossing, switch changes are adjustments, dry run + actual run, checkpoints; generator v2 puts the
+    finish at the far end on most mazes; set `lab/tracksets/rr-2027`. What-if for the RMI robot: 4.2 % of sessions
+    finish on 4 m mazes (VALIDATION.md). Final-round yellow blocks are stored as rules, not simulated yet.
   - Waiting on you: review ~20 sample tracks (`npm run lab -- tracks sheet --set lab/tracksets/rr-2027`, open
     `sheet.html`). Ask the organisers: worked example 54 s vs formula 56 s; restart counting span.
   - Reference photos are kept in `lab/references/` (git-ignored).
