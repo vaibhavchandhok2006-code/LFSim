@@ -111,3 +111,22 @@ CSV / PNG / HTML report / GIF (2.0 MB) downloads, dark theme. No page or worker 
 | `npm run lab -- doctor` on Linux | all four OK | pass (Node 22.23, Git 2.43, GCC 13.3, Claude Code 2.1) |
 | Speed (one core, sample track, 30 s run incl. track import) | measured | 14× real time; most of a short run is the one-off track import and junction graph (to be cached in Phase 1) |
 | Windows setup guide (2026-11-16, your HP laptop) | doctor all OK | pass (Node 26.13, Git 2.56, MSYS2 GCC 16.2, Claude Code 2.1.325); fixes needed on the way: add C:\Users\<you>\.local\bin to PATH after the Claude installer, and allow scripts with Set-ExecutionPolicy -Scope CurrentUser RemoteSigned |
+
+## LFSim Lab Phase 1 — built 2026-11-18 (sample approval pending)
+| Check | Expected | Result |
+| --- | --- | --- |
+| Competition file loads and rejects bad schema, version, ranges, types (lab/src/competition.test.ts) | clear errors | pass |
+| Rulebook worked example (40 s, 2 off-line, 3 restarts, 2 adjustments) | formula result | 56 s by the formula; the rulebook prints 54 s (its arithmetic slip, see DECISIONS.md) |
+| Generator reproducible: same seed, same pixels; different seed differs | identical / different | pass |
+| Track set rr-v1: 500 tracks (300 tuning, 200 held-out) pass every rule check (`tracks check`) | 500 / 500 | pass. Checks: 2.5 m mat, line 3–4 cm, start square in a corner cell, one exit from the start, one pathway into the finish, all lines connected, ≥ 2 routes, neither wall follower finds the finish within 1.5 × the shortest route |
+| Tuning and held-out tracks never share a seed; a manifest that mixes them or points outside the set is refused | refused | pass |
+| A saved track loads back bit-identical to the generated one | identical | pass |
+| Statistics: the reference maze inside the generated 10–90 % range (24 sample tracks) | inside | pass: junctions 38–62 (reference 59), line length 26.9–32.6 m (32.0), loops 23–35 (28), curved share 0.08–0.15 (0.14), dead ends 4–13 (12) |
+| Sample tracks look like Shaastra mazes (you review `sheet.html`) | approved | **pending** |
+| Session rules, one test each (lab/src/session.test.ts): explore then memory runs, official time = best score, cut-off run not counted; re-entry aborts and counts a restart; restart penalty and the alternative counting rule; 10-minute limit includes setup; never leaving the start is not a restart; reproducible with varied placement | pass | pass (6 tests) |
+| Benchmark: one thread vs worker threads give identical session results | identical | pass |
+| Replay: a failed run's project file, run headless, ends the same way at the same time | within 0.01 s | pass |
+| Photo import: an angled render of a generated maze, flattened from its corners, matches the top-down maze | < 12 % pixel difference, same start, junctions within 10 % | pass; corners validated in files; browser drag test (e2e/photo_import.py) on the Shaastra event photo: perspective corrected, start and finish found |
+| Website = command line after Phase 1 changes (e2e/headless_match.py) | identical CSV rows | pass (Settings 4,174 rows, Code 4,474 rows) |
+| Speed target (estimate: 50 sessions/min on 8 cores) | ≥ 50/min | 22.1 sessions/min on this 2-core machine (≈ 11 per core); about 80/min expected on 8 cores. Faster after caching the junction graph and the `darkAt` change (4.4 → 11.3 per core, results bit-identical) |
+| What-if report, current robot (RMI test rig profile, Settings mode, Trémaux, default switch ladder), 200 held-out tracks × 3 variations | report | 15.5 % of sessions finish (95 % interval 12.8–18.6 %); median official time 68.6 s (10–90 %: 29.7–124.2 s); median first finish 148 s into the session; 5.0 restarts per session. Runs in failed sessions ended by: operator gave up 999, stopped away from the finish 879, re-entered the start square 929. Clean / uneven light / harsh: 15.0 / 17.0 / 14.5 %. On 12 tracks LSRB: 2 of 12 sessions, Trémaux 4 of 12 |

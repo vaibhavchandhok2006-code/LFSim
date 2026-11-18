@@ -1,4 +1,4 @@
-# LFSim — handoff (16 Nov 2026)
+# LFSim — handoff (18 Nov 2026)
 
 Live app: https://vaibhavchandhok2006-code.github.io/LFSim/ · Spec: `docs/LFSim_Spec_v1.pdf` (then PRD.md, DECISIONS.md).
 
@@ -6,10 +6,15 @@ Live app: https://vaibhavchandhok2006-code.github.io/LFSim/ · Spec: `docs/LFSim
 - v1 (Phases 1–5) done.
 - **Independent Test Report: all 21 defects addressed.** 20 fixed and verified; D2 fixed on clean mazes, with a
   documented limit on the dense Robo-Run sample (below). 77 automated tests and the browser smoke test pass.
-- **LFSim Lab** (spec: `docs/lab/SPEC.md`): Phase 0 done 2026-11-16 — headless command line identical to the website,
-  Windows laptop set up and checked (`npm run lab -- doctor` all OK). Next: Phase 1 (competition profile, track
-  generator, photo import, 10-minute session benchmark, what-if report). Shaastra reference images: 2024, 2025, 2026
-  (3–4 images, to be sent).
+- **LFSim Lab** (spec: `docs/lab/SPEC.md`, how-to: `lab/README.md`):
+  - Phase 0 done 2026-11-16: headless command line identical to the website; Windows laptop set up.
+  - Phase 1 built 2026-11-18: Robo-Run rules as data (`lab/competition/roborun.json`), maze generator + rule checker,
+    track set `lab/tracksets/rr-v1` (300 tuning / 200 held-out, regenerate with `tracks make`, not committed), full
+    10-minute session simulation, parallel benchmark with HTML report and replay projects, photo import from four
+    corners (website Track tab and `run --corners`). Results in VALIDATION.md.
+  - Waiting on you: review ~20 sample tracks (`npm run lab -- tracks sheet --set lab/tracksets/rr-v1`, open
+    `sheet.html`). Ask the organisers: worked example 54 s vs formula 56 s; restart counting span.
+  - Reference photos are kept in `lab/references/` (git-ignored).
 - Reality check against the real robot when it is free (LFSim Lab Phase 3).
 
 ## What changed for the test report
@@ -37,6 +42,10 @@ Live app: https://vaibhavchandhok2006-code.github.io/LFSim/ · Spec: `docs/LFSim
 `wip/junction_exam.test.ts.txt` (approaches every junction). Copy to `src/zz_*.test.ts` to run; delete after.
 
 ## Next steps
-1. Reality check: run the RMI robot file and the real robot on the same track, compare speed/time.
+1. Phase 1 sign-off (sample review). Generator v2 ideas: keep the finish square's own line plain (a loop next to the
+   square looks odd); bigger features spanning two cells (long zigzags, tall S-bends) as on real mazes.
+2. LFSim Lab Phase 2: compile the real ESP-IDF / Arduino firmware against a hardware shim, run it in lock-step;
+   Code-mode sessions with switch inputs.
+3. Reality check / calibration (Phase 3): run the RMI robot file and the real robot on the same track.
 2. Optional: improve dense-junction reading (split merged edge groups by length; curved-arrival line direction).
 3. v2 features.
