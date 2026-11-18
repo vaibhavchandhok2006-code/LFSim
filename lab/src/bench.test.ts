@@ -3,8 +3,9 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { loadCompetition } from './competition';
-import { makeTrackSet, loadTrackSet, loadSetTrack, recheckSet, DEFAULT_TEMPLATE } from './tracksets';
-import { generateTemplateTrack } from './tracks';
+import { makeTrackSet, loadTrackSet, loadSetTrack, recheckSet, DEFAULT_TEMPLATE, kindFor } from './tracksets';
+import { generateTemplateTrack, generateTrack } from './tracks';
+import { NOVEL_BUDGET } from '../../src/track/generate';
 import { designFromRobot } from './design';
 import { runBench, summarise, wilson } from './bench';
 import { writeResults } from './report';
@@ -17,13 +18,15 @@ const c = loadCompetition(new URL('../competition/roborun-2026.json', import.met
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lab-set-'));
 const design = designFromRobot(new URL('../examples/rmi-test-rig.robot.json', import.meta.url).pathname, { algorithm: 'tremaux' });
 
-beforeAll(async () => { await makeTrackSet(dir, 'test-set', c, { tune: 2, held: 3 }, undefined, 0); }, 600_000);
+beforeAll(async () => { await makeTrackSet(dir, 'test-set', c, { tune: 2, held: 3, novel: 2 }, undefined, 0, [DEFAULT_TEMPLATE], 0.5); }, 600_000);
 
 describe('track sets', () => {
   it('keeps tuning and held-out tracks apart and every track passes the checks', () => {
     const m = loadTrackSet(dir);
     expect(m.entries.filter((e) => e.part === 'tune').length).toBe(2);
     expect(m.entries.filter((e) => e.part === 'held').length).toBe(3);
+    expect(m.entries.filter((e) => e.part === 'novel').every((e) => e.level === 'novel')).toBe(true);
+    expect(m.entries.filter((e) => e.part === 'novel').length).toBe(2);
     const tune = new Set(m.entries.filter((e) => e.part === 'tune').map((e) => Math.floor(e.seed / 1000)));
     for (const e of m.entries.filter((x) => x.part === 'held')) expect(tune.has(Math.floor(e.seed / 1000))).toBe(false);
     expect(recheckSet(dir, c).every((r) => r.problems.length === 0)).toBe(true);
@@ -33,7 +36,8 @@ describe('track sets', () => {
     const m = loadTrackSet(dir);
     const e = m.entries[0];
     const fromFile = loadSetTrack(dir, e);
-    const fresh = generateTemplateTrack(Math.floor(e.seed / 1000), c, [DEFAULT_TEMPLATE]).track;
+    const seed = Math.floor(e.seed / 1000);
+    const fresh = (e.level === 'route' ? generateTrack(seed, c) : e.level === 'novel' ? generateTrack(seed, c, { budget: NOVEL_BUDGET, gap_cm: 2.5 }) : generateTemplateTrack(seed, c, [DEFAULT_TEMPLATE])).track;
     expect(Buffer.from(fromFile.dark.buffer).equals(Buffer.from(fresh.dark.buffer))).toBe(true);
     expect(fromFile.startPose).toEqual(fresh.startPose);
   }, 60_000);
@@ -75,6 +79,13 @@ describe('benchmark', () => {
     }
     expect(replayed).toBeGreaterThanOrEqual(1);
   }, 600_000);
+
+  it('mixed sets: about half the tune / held tracks are variations of the real maze', () => {
+    let v = 0;
+    for (let s = 1; s <= 2000; s += 1) if (kindFor(s, 0.5) === 'variation') v += 1;
+    expect(v / 2000).toBeGreaterThan(0.45); expect(v / 2000).toBeLessThan(0.55);
+    expect(kindFor(7, 0)).toBe('route'); expect(kindFor(7, 1)).toBe('variation');
+  });
 
   it('Wilson interval', () => {
     expect(wilson(0, 0)).toEqual([0, 0]);

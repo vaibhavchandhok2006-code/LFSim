@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { loadCompetition } from './competition';
 import { generateTrack, checkTrack, trackFromMaze } from './tracks';
-import { generateMaze, renderMaze, REFERENCE_BUDGET, type Feature } from '../../src/track/generate';
+import { generateMaze, renderMaze, REFERENCE_BUDGET, NOVEL_BUDGET, type Feature } from '../../src/track/generate';
 import { buildGraph } from '../../src/track/graph';
 import { loadGridMaze } from '../../src/testutil';
 
@@ -49,5 +49,15 @@ describe('track generator', () => {
     const mean = junctions.reduce((a, b) => a + b, 0) / junctions.length;
     expect(mean).toBeGreaterThan(18); // the reference has about 25–30 T-junctions plus crossings
     expect(mean).toBeLessThan(55);
+  }, 300_000);
+
+  it('novel-style mazes: new feature types (chevrons, forks, ladders, circles on the line, crossings), tighter gaps, all rules kept', () => {
+    const seen = new Set<string>();
+    for (let s = 31; s <= 36; s += 1) {
+      const t = generateTrack(s, c, { budget: NOVEL_BUDGET, gap_cm: 2.5 });
+      expect(t.check.problems).toEqual([]);
+      for (const f of Object.keys(t.maze.features)) seen.add(f);
+    }
+    for (const f of ['chevron', 'fork', 'ladder', 'circles', 'cross']) expect(seen.has(f), f).toBe(true);
   }, 300_000);
 });

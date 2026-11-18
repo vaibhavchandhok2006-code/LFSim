@@ -63,7 +63,7 @@ export function writeResults(dir: string, o: {
   const html = `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>LFSim Lab — ${esc(design.name)}</title><style>${CSS}</style>
 <h1>${esc(design.name)}</h1>
-<div class="meta">${esc(m.name)} · ${o.part === 'held' ? 'held-out tracks (never used for tuning)' : 'tuning tracks'} · ${s.sessions} full ${o.competition.session.access_s / 60}-minute sessions (${s.sessions / o.variations} tracks × ${o.variations} variation${o.variations > 1 ? 's' : ''}) · ${new Date().toISOString().slice(0, 16).replace('T', ' ')} UTC</div>
+<div class="meta">${esc(m.name)} · ${o.part === 'held' ? 'held-out tracks (never used for tuning)' : o.part === 'novel' ? 'novel-style tracks (a style never used for tuning)' : 'tuning tracks'} · ${s.sessions} full ${o.competition.session.access_s / 60}-minute sessions (${s.sessions / o.variations} tracks × ${o.variations} variation${o.variations > 1 ? 's' : ''}) · ${new Date().toISOString().slice(0, 16).replace('T', ' ')} UTC</div>
 <div class="big">
 <div><b>${pct(s.finishRate)}</b><span>sessions with a valid time<br>95 % interval ${pct(ci[0])} – ${pct(ci[1])}</span></div>
 <div><b>${sec(s.officialTime_s.median)}</b><span>median official time<br>10–90 %: ${sec(s.officialTime_s.p10)} – ${sec(s.officialTime_s.p90)}</span></div>
@@ -74,6 +74,8 @@ export function writeResults(dir: string, o: {
 Not calibrated against the real robot yet: the simulator's numbers are estimates until Phase 3.</p>
 <h2>By variation</h2><table><tr><th>Variation</th><th>Sessions</th><th>Finish rate</th><th>Median official time</th></tr>
 ${s.byVariation.map((v) => `<tr><td>${esc(v.name)}</td><td>${v.sessions}</td><td><span class="bar"><i style="width:${v.finishRate * 100}%"></i></span> ${pct(v.finishRate)}</td><td>${sec(v.medianOfficial_s)}</td></tr>`).join('')}</table>
+<h2>By maze style</h2><p class="meta">Variations of the real maze (easy / normal / hard), generated route-style mazes, and novel-style mazes (never used for tuning).</p><table><tr><th>Style</th><th>Sessions</th><th>Finish rate</th><th>Median official time</th></tr>
+${s.byStyle.map((v) => `<tr><td>${esc(v.style)}</td><td>${v.sessions}</td><td><span class="bar"><i style="width:${v.finishRate * 100}%"></i></span> ${pct(v.finishRate)}</td><td>${sec(v.medianOfficial_s)}</td></tr>`).join('')}</table>
 <h2>By track feature</h2><p class="meta">Finish rate over sessions on tracks that contain the feature.</p><table><tr><th>Feature</th><th>Sessions</th><th>Finish rate</th></tr>
 ${s.byFeature.map((v) => `<tr><td>${esc(v.feature)}</td><td>${v.sessions}</td><td><span class="bar"><i style="width:${v.finishRate * 100}%"></i></span> ${pct(v.finishRate)}</td></tr>`).join('')}</table>
 ${Object.keys(s.checkpointsWithoutFinish).length ? `<h2>Sessions without a finish: furthest checkpoint</h2><p class="meta">Such a session scores (time + penalties) ÷ C for its furthest checkpoint (C = 0: none reached; checkpoints assumed at 25 / 50 / 75 % of the shortest route).</p><table><tr><th>Furthest checkpoint C</th><th>Sessions</th></tr>${Object.entries(s.checkpointsWithoutFinish).sort().map(([k, v]) => `<tr><td>${k}</td><td>${v}</td></tr>`).join('')}</table>` : ''}

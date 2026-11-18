@@ -13,14 +13,19 @@ import type { Feature } from '../../src/track/generate';
 import type { Competition } from './competition';
 import type { Checkpoint } from './session';
 import { generateTrack, generateTemplateTrack, checkTrack, type TrackCheck } from './tracks';
+import { NOVEL_BUDGET } from '../../src/track/generate';
 import { trackStats, type TrackStats } from './stats';
 
-export const GENERATOR_VERSION = 4; // 4: variations of real mazes (templates) by default; 3: // 3: route-style mazes with a feature budget from the reference mazes (2: 4 m lattice)
+export const GENERATOR_VERSION = 5; // 5: mixed sets (variations + route mazes) and a novel-style group; 4: variations only; 3: route mazes; 2: 4 m lattice
 export const HELD_OUT_SEED_BASE = 1_000_000;
+export const NOVEL_SEED_BASE = 2_000_000;
 // The real Shaastra maze that track sets vary by default (empty list = generated route-style mazes).
 export const DEFAULT_TEMPLATE = new URL('../../public/samples/roborun-sample.png', import.meta.url).pathname; // held-out seeds start here; tuning seeds start at 1
 
-export type Part = 'tune' | 'held';
+// tune: for tuning; held: held-out mazes of the same styles; novel: mazes in a style never used for tuning (new feature
+// types, tighter gaps) — does the design work on a maze that does not look like the ones it was tuned on?
+export type Part = 'tune' | 'held' | 'novel';
+export type Kind = 'variation' | 'route' | 'novel';
 export interface SetEntry {
   id: string;               // e.g. tune-0001
   part: Part;
@@ -52,11 +57,13 @@ export function writePng(file: string, gray: Uint8ClampedArray, w: number, h: nu
   fs.writeFileSync(file, PNG.sync.write(png, { colorType: 0, inputColorType: 6 }));
 }
 
-export interface TrackJob { part: Part; k: number; seed: number; dir: string; competition: Competition; templates: string[] }
+export interface TrackJob { part: Part; k: number; seed: number; dir: string; competition: Competition; templates: string[]; kind: Kind }
 
 // Generate one track of a set and save its PNG (runs on a worker thread when the set is made in parallel).
 export function makeOne(j: TrackJob): SetEntry {
-  const t = j.templates.length ? generateTemplateTrack(j.seed, j.competition, j.templates) : { ...generateTrack(j.seed, j.competition), level: 'route', template: 'route' };
+  const t = j.kind === 'variation' ? generateTemplateTrack(j.seed, j.competition, j.templates)
+    : j.kind === 'novel' ? { ...generateTrack(j.seed, j.competition, { budget: NOVEL_BUDGET, gap_cm: 2.5 }), level: 'novel', template: 'novel' }
+    : { ...generateTrack(j.seed, j.competition), level: 'route', template: 'route' };
   const id = `${j.part}-${String(j.k + 1).padStart(4, '0')}`;
   const file = `tracks/${id}.png`;
   writePng(path.join(j.dir, file), t.gray, t.track.w, t.track.h);
@@ -66,11 +73,16 @@ export function makeOne(j: TrackJob): SetEntry {
   };
 }
 
-export async function makeTrackSet(dir: string, name: string, c: Competition, counts: { tune: number; held: number }, onProgress?: (done: number, total: number) => void, workers = Math.max(1, os.availableParallelism() - 1), templates: string[] = [DEFAULT_TEMPLATE]): Promise<TrackSetManifest> {
+// Which kind of maze a tune / held track is: about `mix` of them are variations of real mazes, the rest route-style.
+export const kindFor = (seed: number, mix: number): Kind => (((Math.imul(seed >>> 0, 2246822519) >>> 0) % 1000) / 1000 < mix ? 'variation' : 'route');
+
+export async function makeTrackSet(dir: string, name: string, c: Competition, counts: { tune: number; held: number; novel?: number }, onProgress?: (done: number, total: number) => void, workers = Math.max(1, os.availableParallelism() - 1), templates: string[] = [DEFAULT_TEMPLATE], mix = 1): Promise<TrackSetManifest> {
+  if (mix > 0 && !templates.length) throw new Error('Variations need at least one template image.');
   fs.mkdirSync(path.join(dir, 'tracks'), { recursive: true });
   const jobs: TrackJob[] = [
-    ...Array.from({ length: counts.tune }, (_, k) => ({ part: 'tune' as Part, k, seed: 1 + k, dir, competition: c, templates })),
-    ...Array.from({ length: counts.held }, (_, k) => ({ part: 'held' as Part, k, seed: HELD_OUT_SEED_BASE + 1 + k, dir, competition: c, templates })),
+    ...Array.from({ length: counts.tune }, (_, k) => ({ part: 'tune' as Part, k, seed: 1 + k, dir, competition: c, templates, kind: kindFor(1 + k, mix) })),
+    ...Array.from({ length: counts.held }, (_, k) => ({ part: 'held' as Part, k, seed: HELD_OUT_SEED_BASE + 1 + k, dir, competition: c, templates, kind: kindFor(HELD_OUT_SEED_BASE + 1 + k, mix) })),
+    ...Array.from({ length: counts.novel ?? 0 }, (_, k) => ({ part: 'novel' as Part, k, seed: NOVEL_SEED_BASE + 1 + k, dir, competition: c, templates, kind: 'novel' as Kind })),
   ];
   const entries: SetEntry[] = new Array(jobs.length);
   let done = 0;
@@ -106,15 +118,15 @@ export function loadTrackSet(dir: string): TrackSetManifest {
   if (m.schema !== 'lfsim-lab/trackset' || m.version !== 1 || !Array.isArray(m.entries)) throw new Error(`${file}: not a version-1 track set manifest.`);
   if (m.generatorVersion !== GENERATOR_VERSION) throw new Error(`${file}: made by generator version ${m.generatorVersion}; this build is version ${GENERATOR_VERSION}. Make a new set.`);
   for (const e of m.entries) {
-    if (typeof e.id !== 'string' || !/^(tune|held)-\d{4}$/.test(e.id) || (e.part !== 'tune' && e.part !== 'held')) throw new Error(`${file}: bad entry id or part.`);
-    if (typeof e.file !== 'string' || !/^tracks\/(tune|held)-\d{4}\.png$/.test(e.file)) throw new Error(`${file}: bad track file name for ${e.id}.`);
+    if (typeof e.id !== 'string' || !/^(tune|held|novel)-\d{4}$/.test(e.id) || !['tune', 'held', 'novel'].includes(e.part) || !e.id.startsWith(e.part)) throw new Error(`${file}: bad entry id or part.`);
+    if (typeof e.file !== 'string' || !/^tracks\/(tune|held|novel)-\d{4}\.png$/.test(e.file)) throw new Error(`${file}: bad track file name for ${e.id}.`);
     if (!(e.lineWidth_cm >= 1 && e.lineWidth_cm <= 10)) throw new Error(`${file}: bad line width for ${e.id}.`);
     if (!(e.size_m >= 0.5 && e.size_m <= 10)) throw new Error(`${file}: bad mat size for ${e.id}.`);
     if (!Array.isArray(e.checkpoints) || e.checkpoints.length > 20 || !e.checkpoints.every((c) => [c.x, c.y, c.C].every((v) => typeof v === 'number' && Number.isFinite(v)))) throw new Error(`${file}: bad checkpoints for ${e.id}.`);
   }
   // Tuning and held-out tracks must never share a seed (F6).
   const tuneSeeds = new Set(m.entries.filter((e) => e.part === 'tune').map((e) => Math.floor(e.seed / 1000)));
-  if (m.entries.some((e) => e.part === 'held' && tuneSeeds.has(Math.floor(e.seed / 1000)))) throw new Error(`${file}: a held-out track shares a seed with a tuning track.`);
+  if (m.entries.some((e) => e.part !== 'tune' && tuneSeeds.has(Math.floor(e.seed / 1000)))) throw new Error(`${file}: a held-out track shares a seed with a tuning track.`);
   return m;
 }
 

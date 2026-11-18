@@ -9,9 +9,10 @@ import { Rng } from '../sim/sensors';
 
 export type Feature =
   | 'straight' | 'zigzag' | 'arc' | 'sbend' | 'box' | 'boxSide' | 'oval' | 'diamond' | 'triangles'
-  | 'stub' | 'comb' | 'ring' | 'curve' | 'diagonal' | 'meander';
+  | 'stub' | 'comb' | 'ring' | 'curve' | 'diagonal' | 'meander'
+  | 'chevron' | 'fork' | 'ladder' | 'circles' | 'cross';
 
-export const FEATURES: Feature[] = ['straight', 'zigzag', 'arc', 'sbend', 'meander', 'box', 'boxSide', 'oval', 'diamond', 'triangles', 'stub', 'comb', 'ring', 'curve', 'diagonal'];
+export const FEATURES: Feature[] = ['straight', 'zigzag', 'arc', 'sbend', 'meander', 'box', 'boxSide', 'oval', 'diamond', 'triangles', 'stub', 'comb', 'ring', 'curve', 'diagonal', 'chevron', 'fork', 'ladder', 'circles', 'cross'];
 
 // Feature counts on the reference mazes (lab/references/features.json), per maze, as [min, max] ranges the generator
 // draws from (a little above the references, as asked). Edge features sit on route segments; ring and curve on corners
@@ -19,6 +20,14 @@ export const FEATURES: Feature[] = ['straight', 'zigzag', 'arc', 'sbend', 'meand
 export const REFERENCE_BUDGET: Partial<Record<Feature, [number, number]>> = {
   zigzag: [1, 2], meander: [0, 1], sbend: [0, 1], arc: [1, 2], box: [4, 7], boxSide: [1, 2], oval: [0, 1], diamond: [0, 1],
   triangles: [0, 1], comb: [1, 2], stub: [2, 4], ring: [1, 2], curve: [1, 3], diagonal: [2, 5],
+};
+
+// "Novel" mazes test styles never used for tuning: features the rulebook allows or other photos show, that the
+// reference maze has few or none of — chevrons crossing a line, acute Y-forks, ladders, circles on the line, plus-shaped
+// crossings — with the usual ones rarer, and tighter gaps between neighbouring lines.
+export const NOVEL_BUDGET: Partial<Record<Feature, [number, number]>> = {
+  chevron: [1, 3], fork: [1, 3], ladder: [1, 2], circles: [1, 3], cross: [1, 3], zigzag: [0, 1], box: [1, 3], diamond: [0, 2],
+  triangles: [0, 1], stub: [1, 3], arc: [0, 1], ring: [0, 1], curve: [1, 3], diagonal: [2, 5],
 };
 
 export interface GenOptions {
@@ -33,11 +42,12 @@ export interface GenOptions {
   shortcuts: [number, number]; // links between route parts (loops: more than one way to the finish)
   merge: number;           // chance two straight route segments in line are drawn as one long segment (room for features)
   squareSide_m: number;    // start / finish square side (assumption: 20 cm, inside a 25 cm cell)
+  gap_cm: number;          // smallest white gap between lines that are not meant to meet
 }
 
 export const DEFAULT_GEN: Omit<GenOptions, 'seed'> = {
   size_m: 4, cell_m: 0.25, lineWidth_cm: [3, 4], finish: { corner: 0.7, edge: 0.2, inside: 0.1 },
-  budget: REFERENCE_BUDGET, branches: [4, 7], shortcuts: [3, 5], merge: 0.45, squareSide_m: 0.2,
+  budget: REFERENCE_BUDGET, branches: [4, 7], shortcuts: [3, 5], merge: 0.45, squareSide_m: 0.2, gap_cm: 3.5,
 };
 
 export type P2 = [number, number];
@@ -300,6 +310,50 @@ export function buildEdge(f: Feature, L: number, rng: Rng, across: number, sc = 
       out.push([[prev, 0], [L, 0]]);
       return out;
     }
+    case 'chevron': { // a bracket crossing the line, its arms pointing back (sample maze: the two '>' shapes)
+      const h = Math.min(R(0.09, 0.13), across - 0.05), d = R(0.07, 0.1), xm = L / 2 + R(-0.03, 0.03), e = 0.02;
+      if (xm - d < lead + 0.03 || h < 0.07) return null;
+      const dirn = rng.next() < 0.5 ? -1 : 1;
+      return [[[0, 0], [xm, 0]], [[xm, 0], [L, 0]], [[xm, 0], [xm, -h + e], [xm + dirn * d, -h]], [[xm, 0], [xm, h - e], [xm + dirn * d, h]]];
+    }
+    case 'fork': { // acute Y: the line splits at a narrow angle and joins again
+      const bl = R(0.24, 0.32), h = Math.min(R(0.05, 0.07), across - 0.05);
+      const x1 = (L - bl) / 2, x2 = x1 + bl;
+      if (x1 < lead || h < 0.045) return null;
+      const sg = side(rng);
+      return [[[0, 0], [x1, 0]], [[x2, 0], [L, 0]], [[x1, 0], [x2, 0]], [[x1, 0], [x1 + bl * 0.3, sg * h], [x2 - bl * 0.3, sg * h], [x2, 0]]];
+    }
+    case 'ladder': { // two parallel lines joined by rungs (sample maze: left side)
+      const bl = R(0.22, 0.3), h = Math.min(R(0.1, 0.13), across - 0.05), n = 1 + Math.floor(rng.next() * 2);
+      const x1 = (L - bl) / 2, x2 = x1 + bl;
+      if (x1 < lead || h < 0.085) return null;
+      const sg = side(rng);
+      const xs = [x1, ...Array.from({ length: n }, (_, k) => x1 + (bl * (k + 1)) / (n + 1)), x2];
+      const out: Local = [[[0, 0], [x1, 0]], [[x2, 0], [L, 0]]];
+      for (let k = 0; k < xs.length - 1; k += 1) { out.push([[xs[k], 0], [xs[k + 1], 0]], [[xs[k], sg * h], [xs[k + 1], sg * h]]); }
+      for (const x of xs) out.push([[x, 0], [x, sg * h]]);
+      return out;
+    }
+    case 'circles': { // one or two circles threaded on the line (photo: "dumbbells")
+      const r = Math.min(R(0.06, 0.08), across - 0.05), n = rng.next() < 0.5 ? 1 : 2, gap = 0.06;
+      const span = n * 2 * r + (n - 1) * gap;
+      let x = (L - span) / 2;
+      if (x < lead || r < 0.05) return null;
+      const out: Local = [[[0, 0], [x, 0]]];
+      for (let k = 0; k < n; k += 1) {
+        const c = x + r;
+        out.push(arcPts(c, 0, r, Math.PI, 0).map(([px, py]) => [px, -Math.abs(py)] as P2), arcPts(c, 0, r, Math.PI, 0).map(([px, py]) => [px, Math.abs(py)] as P2));
+        const next = k < n - 1 ? x + 2 * r + gap : L;
+        out.push([[x + 2 * r, 0], [next, 0]]);
+        x = next;
+      }
+      return out;
+    }
+    case 'cross': { // a short line crossing the route: a 4-way crossing with two dead ends
+      const a = Math.min(R(0.07, 0.11), across - 0.05), xm = L / 2 + R(-0.05, 0.05);
+      if (xm < lead + 0.03 || a < 0.06) return null;
+      return [[[0, 0], [xm, 0]], [[xm, 0], [L, 0]], [[xm, 0], [xm, a]], [[xm, 0], [xm, -a]]];
+    }
     default: return null;
   }
 }
@@ -402,7 +456,7 @@ export function generateMaze(opts: Partial<GenOptions> & { seed: number }): Gene
   const plain = (k: number): Feature => (lat.edges[k].diag ? 'diagonal' : 'straight');
   const edgeFeat: Feature[] = lat.edges.map((_, k) => plain(k));
   const touchesSpecial = (k: number) => { const e = lat.edges[k]; return special(e.a) || special(e.b); };
-  const LONG: Feature[] = ['zigzag', 'triangles', 'meander', 'sbend', 'comb'];
+  const LONG: Feature[] = ['zigzag', 'triangles', 'meander', 'sbend', 'comb', 'fork', 'ladder', 'circles'];
   const fits = (f: Feature, k: number) => {
     const e = lat.edges[k];
     if (e.diag) return f === 'zigzag' || f === 'stub' || f === 'arc';
@@ -473,7 +527,7 @@ export function generateMaze(opts: Partial<GenOptions> & { seed: number }): Gene
   // Clear contacts: downgrade the features of every owner involved, until nothing touches by accident.
   let els = build();
   let attempts = 0;
-  const minSep = lw + 0.035;
+  const minSep = lw + o.gap_cm / 100;
   for (; attempts < 12; attempts += 1) {
     const bad = contacts(els.filter((e) => e.owner !== 'start' && e.owner !== 'finish'), minSep, 0.075, o.size_m, lw / 2 + 0.015);
     // Squares: no other line within the gap, except the line that enters it.

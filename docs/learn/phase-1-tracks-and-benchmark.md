@@ -108,3 +108,16 @@ not code:
 
 Lesson: keep rules as data and test them against the rulebook's own examples. When the rulebook changes, the tests
 show exactly what moved.
+
+## Training in stages
+
+A robot (or an optimiser) tuned on one style of maze can learn that style instead of maze-solving in general. So the
+track sets grow in stages, like a curriculum:
+
+1. **Stage 1 (now):** variations of last year's Shaastra maze, easy, normal and hard.
+2. **Stage 2:** add mazes generated from scratch (a different arrangement of the same kinds of features).
+3. **Stage 3:** add a *novel* group the robot is never tuned on: new shapes the rulebook allows (chevrons, Y-forks,
+   ladders, circles on the line, crossings) and tighter gaps between lines.
+
+The report shows the finish rate for each style. If a design does well on stage 1 but badly on the novel group, it has
+learned the maze, not the skill.

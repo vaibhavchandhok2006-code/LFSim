@@ -37,14 +37,15 @@ tracks make options
   --tune <n> --held <n>         tracks in each part (default 300 and 200)
   --name <text>                 set name (default: the folder name)
   --workers <n>                 parallel workers (default: CPU cores − 1)
-  --style template|route        template (default): variations of real mazes, easy / normal / hard;
-                                route: generated route-style mazes
+  --mix <0..1>                  share of tune / held tracks that are variations of real mazes (easy / normal /
+                                hard); the rest are generated route-style mazes (default 1: stage 1, variations only)
+  --novel <n>                   extra "novel" tracks in a style never used for tuning (default 0; stage 3)
   --template a.png,b.png        clean top-down images of real mazes to vary (default: the Shaastra sample)
   --competition <file.json>     rules file (default: lab/competition/roborun-2027.json)
 
 bench options
   --set <folder>                track set
-  --part held|tune              which part (default held: the honest numbers)
+  --part held|tune|novel        which part (default held: the honest numbers; novel: unseen style)
   --robot <file.robot.json>     robot (default: LFSim's default robot), or
   --design <file.design.json>   a full design (robot, settings, switch plan)
   --algorithm <name>            maze algorithm for a robot-file design (default lsrb)
@@ -156,7 +157,7 @@ const competitionFrom = (flags: Map<string, string | true>) => {
 
 async function tracksCmd(cmd: string, flags: Map<string, string | true>): Promise<number> {
   if (cmd === 'tracks make') {
-    onlyFlags(flags, ['out', 'tune', 'held', 'name', 'competition', 'workers', 'style', 'template']);
+    onlyFlags(flags, ['out', 'tune', 'held', 'novel', 'name', 'competition', 'workers', 'mix', 'template']);
     const out = str(flags, 'out'); if (!out) throw new Error('--out <folder> is needed.');
     if (fs.existsSync(path.join(out, 'manifest.json'))) throw new Error(`${out} already holds a track set; choose a new folder.`);
     const tune = num(flags, 'tune') ?? 300, held = num(flags, 'held') ?? 200;
@@ -165,11 +166,15 @@ async function tracksCmd(cmd: string, flags: Map<string, string | true>): Promis
     const t0 = Date.now();
     const workers = num(flags, 'workers');
     if (workers !== undefined && !(Number.isInteger(workers) && workers >= 0 && workers <= 256)) throw new Error('--workers must be a whole number from 0 to 256.');
-    const style = str(flags, 'style') ?? 'template';
-    if (style !== 'template' && style !== 'route') throw new Error('--style must be template or route.');
-    const templates = style === 'route' ? [] : (str(flags, 'template')?.split(',').map((f) => f.trim()).filter(Boolean) ?? [DEFAULT_TEMPLATE]);
+    // Stage 1 (current): only variations of last year's Shaastra maze. Later stages add route-style (--mix < 1) and
+    // novel-style (--novel n) mazes as the robot improves.
+    const mix = num(flags, 'mix') ?? 1;
+    if (!(mix >= 0 && mix <= 1)) throw new Error('--mix must be from 0 (all route-style) to 1 (all variations of real mazes).');
+    const novel = num(flags, 'novel') ?? 0;
+    if (!(Number.isInteger(novel) && novel >= 0 && novel <= 5000)) throw new Error('--novel must be a whole number from 0 to 5000.');
+    const templates = str(flags, 'template')?.split(',').map((f) => f.trim()).filter(Boolean) ?? [DEFAULT_TEMPLATE];
     for (const f of templates) if (!fs.existsSync(f)) throw new Error(`Template image not found: ${f}`);
-    const m = await makeTrackSet(out, str(flags, 'name') ?? path.basename(out), c, { tune, held }, (d, t) => { if (d % 10 === 0 || d === t) process.stdout.write(`\r${d}/${t} tracks`); }, workers, templates);
+    const m = await makeTrackSet(out, str(flags, 'name') ?? path.basename(out), c, { tune, held, novel }, (d, t) => { if (d % 10 === 0 || d === t) process.stdout.write(`\r${d}/${t} tracks`); }, workers, templates, mix);
     process.stdout.write(`\nwrote ${m.entries.length} tracks to ${out} in ${((Date.now() - t0) / 1000).toFixed(0)} s\n`);
     return 0;
   }
@@ -185,7 +190,7 @@ async function tracksCmd(cmd: string, flags: Map<string, string | true>): Promis
   }
   onlyFlags(flags, ['set', 'part', 'competition']);
   const set = str(flags, 'set'); if (!set) throw new Error('--set <folder> is needed.');
-  const part = str(flags, 'part'); if (part !== undefined && part !== 'tune' && part !== 'held') throw new Error('--part must be tune or held.');
+  const part = str(flags, 'part'); if (part !== undefined && part !== 'tune' && part !== 'held' && part !== 'novel') throw new Error('--part must be tune, held or novel.');
   const res = recheckSet(set, competitionFrom(flags), part as Part | undefined);
   const bad = res.filter((r) => r.problems.length);
   for (const b of bad) process.stdout.write(`${b.id}: ${b.problems.join('; ')}\n`);
@@ -196,7 +201,7 @@ async function tracksCmd(cmd: string, flags: Map<string, string | true>): Promis
 async function benchCmd(flags: Map<string, string | true>): Promise<number> {
   onlyFlags(flags, ['set', 'part', 'robot', 'design', 'algorithm', 'base-speed', 'dry', 'variations', 'limit', 'workers', 'out', 'competition', 'round']);
   const set = str(flags, 'set'); if (!set) throw new Error('--set <folder> is needed (make one with: npm run lab -- tracks make --out lab/tracksets/rr-2027).');
-  const part = (str(flags, 'part') ?? 'held') as Part; if (part !== 'tune' && part !== 'held') throw new Error('--part must be tune or held.');
+  const part = (str(flags, 'part') ?? 'held') as Part; if (part !== 'tune' && part !== 'held' && part !== 'novel') throw new Error('--part must be tune, held or novel.');
   const algorithm = str(flags, 'algorithm');
   if (algorithm !== undefined && !ALGORITHMS.includes(algorithm as Algorithm)) throw new Error(`--algorithm must be one of: ${ALGORITHMS.join(', ')}`);
   const bs = num(flags, 'base-speed'); if (bs !== undefined && !(bs > 0 && bs <= 1)) throw new Error('--base-speed must be from 0 to 1.');

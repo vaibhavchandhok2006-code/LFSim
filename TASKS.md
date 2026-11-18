@@ -30,6 +30,9 @@ browser smoke test passes. Next: reality check against the real robot.
       review sheet, photo import from four corners (website + command line)
 - [x] Robo-Run 2027 rulebook: 4 m mat, new penalties, dry run, switch changes as adjustments, checkpoints; finish at the
       far end on most generated mazes (generator v2), new track set `rr-2027`
+- [x] Track sets in stages: stage 1 = variations of the Shaastra maze (default); stage 2 = + route-style mazes;
+      stage 3 = + novel-style group (new shapes, tighter gaps). Report: finish rate by style
+- [ ] Later: move to stage 2, then stage 3, as the robot's finish rate on stage 1 rises
 - [ ] Phase 1 sign-off: you review ~20 sample tracks (`tracks sheet`) and confirm they look like Shaastra mazes
 - [ ] Later: final-round yellow blocks (pushing physics, colour sensor), loop-case checkpoint placement
 - [ ] Ask the organisers: over what span restarts and adjustments are counted; checkpoint places and values; whether a switch change before the first actual run is an adjustment

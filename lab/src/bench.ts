@@ -58,6 +58,7 @@ export interface BenchSummary {
   offLinePerValidRun: number; restartsPerSession: number; adjustmentsPerSession: number;
   checkpointsWithoutFinish: Record<string, number>; // sessions without a finish, by furthest checkpoint C (0 = none)
   byVariation: { name: string; sessions: number; finishRate: number; medianOfficial_s: number | null }[];
+  byStyle: { style: string; sessions: number; finishRate: number; medianOfficial_s: number | null }[]; // variation (easy/normal/hard), route, novel
   byFeature: { feature: string; sessions: number; finishRate: number }[];
   failures: Record<string, number>; // how sessions without a valid time ended their runs
   wall_s: number; sessionsPerMinute: number;
@@ -97,6 +98,14 @@ export function summarise(results: JobResult[], o: { setDir: string; part: Part 
       const f = rs.filter((r) => r.result?.finished);
       return { name: v.name, sessions: rs.length, finishRate: +(f.length / Math.max(1, rs.length)).toFixed(4), medianOfficial_s: quant(f.map((r) => r.result!.officialTime_s!), 0.5) };
     }).filter((x) => x.sessions > 0),
+    byStyle: (() => {
+      const styleOf = (id: string) => { const e = byId.get(id); return !e ? '?' : e.level === 'route' || e.level === 'novel' ? e.level : `variation (${e.level})`; };
+      const names = [...new Set(results.map((r) => styleOf(r.trackId)))].sort();
+      return names.map((name) => {
+        const rs = results.filter((r) => styleOf(r.trackId) === name), f = rs.filter((r) => r.result?.finished);
+        return { style: name, sessions: rs.length, finishRate: +(f.length / Math.max(1, rs.length)).toFixed(4), medianOfficial_s: quant(f.map((r) => r.result!.officialTime_s!), 0.5) };
+      });
+    })(),
     byFeature: [...feats].sort().map((f) => {
       const rs = results.filter((r) => ((byId.get(r.trackId)?.features as Record<string, number> | undefined)?.[f] ?? 0) > 0);
       return { feature: f, sessions: rs.length, finishRate: +(rs.filter((r) => r.result?.finished).length / Math.max(1, rs.length)).toFixed(4) };

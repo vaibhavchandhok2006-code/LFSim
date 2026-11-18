@@ -161,3 +161,11 @@ CSV / PNG / HTML report / GIF (2.0 MB) downloads, dark theme. No page or worker 
 | Set rr-2027 v4: 500 variations (149 easy, 198 normal, 153 hard) | all pass | 500 / 500 in 383 s on 2 workers. Median junctions: easy 58, normal 62, hard 64 (sample 59); dead ends: easy 6, normal 12, hard 12 (sample 12) |
 | Variations look like the Shaastra maze | your review | **pending** |
 | What-if, RMI test rig, Trémaux, 300 s dry run, 40 held-out variations × 3 | report | 0 of 120 sessions finish (95 % interval 0–3.1 %). 773 runs aborted by re-entering the start square: on this maze's layout the exploration keeps coming back into the start square. Main target for Phase 5 (algorithm) |
+
+## New shapes and staged track sets — 2026-11-19
+| Check | Expected | Result |
+| --- | --- | --- |
+| Novel-style mazes use chevrons, Y-forks, ladders, circles on the line and crossings, with 2.5 cm gaps, and pass every rule (test, 6 mazes) | pass | pass |
+| Mixed sets: about half the tracks are variations at `--mix 0.5` (2,000 seeds) | 45–55 % | pass |
+| Track groups tune / held / novel never share a seed; the report shows the finish rate per style | pass | pass (tests) |
+| Stage 1 set rr-2027: 500 variations of the Shaastra maze (default) | all pass | 500 / 500 in 367 s |
