@@ -3,3 +3,7 @@ dist
 *.log
 .DS_Store
 *.tsbuildinfo
+
+# Reference photos of real mazes (third-party event photos; kept local, not published)
+lab/references/*.png
+lab/references/*.jpg
