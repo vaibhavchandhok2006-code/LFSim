@@ -27,7 +27,10 @@ export class Engine {
   error: string | undefined;
   private firmware: FirmwareBrain | null = null;
 
-  constructor(msg: StartMsg) {
+  // record = false skips frames and CSV rows (headless benchmarks that only need the outcome).
+  private readonly recordOn: boolean;
+  constructor(msg: StartMsg, opts: { record?: boolean } = {}) {
+    this.recordOn = opts.record ?? true;
     this.runId = msg.runId;
     let brain: Brain;
     if (msg.brain.mode === 'settings') brain = new SettingsBrain(msg.brain.settings);
@@ -52,6 +55,7 @@ export class Engine {
   }
 
   private record() {
+    if (!this.recordOn) return;
     const s = this.sim, b = s.body, ph = s.physics;
     const tel = s.brain.telemetry();
     const state = s.brain.state();

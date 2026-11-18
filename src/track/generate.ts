@@ -29,9 +29,9 @@ export interface GenOptions {
 }
 
 export const DEFAULT_GEN: Omit<GenOptions, 'seed'> = {
-  size_m: 2.5, cell_m: 0.25, lineWidth_cm: [3, 4], lattice: 7, dropFrac: [0.04, 0.16], loopFrac: [0.12, 0.25], diagonalP: 0.12,
-  edgeMix: { straight: 5, zigzag: 1.2, arc: 1, sbend: 0.8, box: 0.8, boxSide: 0.6, oval: 0.5, diamond: 0.6, triangles: 0.5, stub: 1.2, comb: 0.6 },
-  ringP: 0.18, curveP: 0.5, squareSide_m: 0.2,
+  size_m: 2.5, cell_m: 0.25, lineWidth_cm: [3, 4], lattice: 7, dropFrac: [0.0, 0.1], loopFrac: [0.25, 0.45], diagonalP: 0.15,
+  edgeMix: { straight: 2.6, zigzag: 1.1, arc: 0.9, sbend: 0.8, box: 1.1, boxSide: 0.9, oval: 0.6, diamond: 0.8, triangles: 0.6, stub: 1.3, comb: 0.7 },
+  ringP: 0.25, curveP: 0.7, squareSide_m: 0.2,
 };
 
 type P2 = [number, number];

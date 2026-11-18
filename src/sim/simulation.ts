@@ -24,6 +24,14 @@ export type RunStatus = 'ready' | 'running' | 'finished' | 'stopped';
 const TICK = 0.001;   // 1 kHz
 const SUB = 4;        // physics sub-steps per tick
 
+// The junction graph depends only on the track's pixels; build it once per track (many runs share a track).
+const graphCache = new WeakMap<Float32Array, ReturnType<typeof buildGraph>>();
+function graphFor(track: Track) {
+  let g = graphCache.get(track.dark);
+  if (!g) { g = buildGraph(track); graphCache.set(track.dark, g); }
+  return g;
+}
+
 export class Simulation {
   readonly track: Track;
   readonly profile: RobotProfile;
@@ -75,7 +83,7 @@ export class Simulation {
     this.io = this.makeIO();
     this.sensors.read(track, this.body.x, this.body.y, this.body.theta);
     let judge: ShortcutJudge | null = null;
-    try { judge = new ShortcutJudge(track, buildGraph(track)); } catch { judge = null; }
+    try { judge = new ShortcutJudge(track, graphFor(track)); } catch { judge = null; }
     this.judge = judge;
     brain.reset(this.io);
   }
