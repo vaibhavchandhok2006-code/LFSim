@@ -107,7 +107,7 @@ export function trackFromMaze(maze: GeneratedMaze, name: string): { track: Track
 }
 
 // Generate the maze for a seed; if it breaks a rule, move to the next sub-seed (recorded) until one passes.
-export function generateTrack(seed: number, c: Competition, gen: Partial<GenOptions> = {}, maxTries = 25): GeneratedTrack & { subSeed: number; rejected: string[] } {
+export function generateTrack(seed: number, c: Competition, gen: Partial<GenOptions> = {}, maxTries = 80): GeneratedTrack & { subSeed: number; rejected: string[] } {
   const rejected: string[] = [];
   for (let k = 0; k < maxTries; k += 1) {
     const sub = seed * 1000 + k;
