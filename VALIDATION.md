@@ -169,3 +169,11 @@ CSV / PNG / HTML report / GIF (2.0 MB) downloads, dark theme. No page or worker 
 | Mixed sets: about half the tracks are variations at `--mix 0.5` (2,000 seeds) | 45–55 % | pass |
 | Track groups tune / held / novel never share a seed; the report shows the finish rate per style | pass | pass (tests) |
 | Stage 1 set rr-2027: 500 variations of the Shaastra maze (default) | all pass | 500 / 500 in 367 s |
+
+## Phase 2: firmware in the loop — 2026-11-19
+| Check | Expected | Result |
+| --- | --- | --- |
+| Reference firmware, C (native, FreeRTOS 1000 Hz) vs its JS translation (Code mode), sample + 19 variations, 12 s each | byte-identical engine logs | identical on all 20 tracks (test) |
+| RMI test-rig firmware, unchanged, with presses on GPIO 4 at 0.3 / 3.8 / 4.3 s and a sweep 0.5–3.6 s | calibrates, starts after the third press, drives | starts at > 4.2 s, drives > 1 m (test); CLI: 10.44 m in 40 s simulated, 27× real time |
+| Firmware with a compile error | clear error with the GCC message, no run | pass (test) |
+| Both examples built with ESP-IDF v5.2 for ESP32 (GitHub workflow esp32.yml) | build succeeds | success (run 44388197038) |

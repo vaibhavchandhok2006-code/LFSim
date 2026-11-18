@@ -167,7 +167,7 @@ jobs · AI-written firmware runs only in the simulator until the user flashes it
 | --- | --- | --- |
 | 0. Setup | Windows setup; simulator from the command line | Headless = website for the same seed; CI on Linux — **done 2026-11-16** |
 | 1. Tracks + benchmark | Competition profile, track generator, photo import, track sets, session simulation, what-if report, live page, results viewer | 500 tracks pass the checker; statistics within reference ranges; samples approved; every rule tested; speed target; what-if report for the current robot — **built 2026-11-18** (sample approval pending; see VALIDATION.md) |
-| 2. Firmware in the loop | Hardware shim; C compiled and run in the sim; ESP32 build | main.c matches its JS translation on 20 tracks; ESP32 build in CI |
+| 2. Firmware in the loop | Hardware shim; C compiled and run in the sim; ESP32 build | main.c matches its JS translation on 20 tracks; ESP32 build in CI (**done 2026-11-19**: a reference firmware in C and in JS gives identical logs on 20 tracks; the RMI firmware runs unchanged; both build for ESP32) |
 | 3. Calibration | Test firmware, log import, fit, report | Straight ±5 %, spin ±10 %, sensors ±10 % (targets, estimate) |
 | 4. Parameter optimiser | Control and Mode A geometry search; switch table | Beats the hand-tuned baseline on held-out tracks beyond run-to-run spread |
 | 5. Algorithm agent | Claude Code loop for maze logic in C | ≥ 95 % finish over full sessions on held-out tracks, then faster |

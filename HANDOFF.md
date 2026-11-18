@@ -48,8 +48,8 @@ Live app: https://vaibhavchandhok2006-code.github.io/LFSim/ · Spec: `docs/LFSim
 ## Next steps
 1. Phase 1 sign-off (sample review). Generator v2 ideas: keep the finish square's own line plain (a loop next to the
    square looks odd); bigger features spanning two cells (long zigzags, tall S-bends) as on real mazes.
-2. LFSim Lab Phase 2: compile the real ESP-IDF / Arduino firmware against a hardware shim, run it in lock-step;
-   Code-mode sessions with switch inputs.
+2. Phase 2 is done (native C firmware in the loop, see docs/learn/phase-2-firmware-in-the-loop.md). Open: sessions
+   and benchmarks with native firmware, Arduino .ino, NVS/PCNT, a sandbox for AI-written native code.
 3. Reality check / calibration (Phase 3): run the RMI robot file and the real robot on the same track.
 2. Optional: improve dense-junction reading (split merged edge groups by length; curved-arrival line direction).
 3. v2 features.

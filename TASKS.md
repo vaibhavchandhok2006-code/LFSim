@@ -36,7 +36,11 @@ browser smoke test passes. Next: reality check against the real robot.
 - [ ] Phase 1 sign-off: you review ~20 sample tracks (`tracks sheet`) and confirm they look like Shaastra mazes
 - [ ] Later: final-round yellow blocks (pushing physics, colour sensor), loop-case checkpoint placement
 - [ ] Ask the organisers: over what span restarts and adjustments are counted; checkpoint places and values; whether a switch change before the first actual run is an adjustment
-- [ ] Phase 2: real C firmware (ESP-IDF / Arduino) compiled and run in the simulator; Code-mode sessions with switches
+- [x] Phase 2: your ESP-IDF C firmware compiled with GCC against a hardware shim and run unchanged in the simulator
+      (`run --firmware`); button presses with interrupts and a calibration sweep; C = JS proved on 20 tracks;
+      both examples build for ESP32 in CI (esp32.yml)
+- [ ] Later in Phase 2 scope: sessions and benchmarks with native firmware; Arduino .ino (C++ shim); NVS, PCNT,
+      extra FreeRTOS tasks; a sandbox for AI-written native code (before Phase 5)
 - [ ] Phase 3–8: see the spec
 - Findings for later phases: the current robot with LSRB / Trémaux often drives back into the start square (aborts
   the run) and explores slowly on dense mazes — work for the algorithm agent (Phase 5)

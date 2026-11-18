@@ -3,7 +3,7 @@
 Finds the best Robo-Run line follower by testing designs on many tracks without a browser. Spec:
 [LFSim Lab — Spec v1](https://claude.ai/artifact/7noPMWNsUYry7sCm8jCajX).
 
-Status: **Phase 1 done** (updated to the Shaastra Robo-Run 2027 rulebook: 4 m mat, dry run, new penalties, checkpoints) — generated Robo-Run track sets, full 10-minute session benchmark with a report, photo
+Status: **Phase 2 done** (your C firmware runs unchanged inside the simulator). **Phase 1 done** (updated to the Shaastra Robo-Run 2027 rulebook: 4 m mat, dry run, new penalties, checkpoints) — generated Robo-Run track sets, full 10-minute session benchmark with a report, photo
 import from four corners. Phase 0: the simulator runs from the command line with the same results as the website.
 Next: Phase 2 (your real C firmware compiled and run inside the simulator).
 
@@ -12,6 +12,9 @@ npm run lab -- help
 npm run lab -- doctor                                   # check Node, Git, gcc, Claude Code
 npm run lab -- run --project my.lfsim.json --seconds 120 --csv run.csv --json run.json
 npm run lab -- run --track public/samples/roborun-sample.png --robot my.robot.json
+npm run lab -- run --track public/samples/roborun-sample.png --robot lab/examples/rmi-test-rig.robot.json \
+  --firmware lab/firmware/examples/rmi-test-rig/main/main.c --wiring lab/firmware/examples/rmi-test-rig/main/wiring.json \
+  --presses 4@0.3,4@3.8,4@4.3 --sweep 0.5-3.6 --serial serial.txt
 npm run lab -- run --track photo.png --corners 47.5,37.8,96.6,53.1,73.6,103.3,1.6,69.7 --track-png flat.png
 
 npm run lab -- tracks make --out lab/tracksets/rr-2027        # 300 tuning + 200 held-out variations of the Shaastra maze
@@ -44,6 +47,10 @@ Windows setup: [docs/WINDOWS_SETUP.md](docs/WINDOWS_SETUP.md).
 | `src/bench.ts`, `benchJob.ts`, `benchWorker.ts` | Parallel benchmark on worker threads, summary statistics |
 | `src/report.ts` | Results folder, HTML report, live progress page, replay projects |
 | `examples/` | Your robot's profile (no firmware) |
+| `firmware/shim/` | Stand-in ESP-IDF headers and `shim.c`: hardware calls go to the simulator over a pipe |
+| `firmware/examples/` | ESP-IDF projects: your RMI test-rig firmware (unchanged) and a reference firmware in C + its JS translation |
+| `src/native.ts` | Builds firmware with GCC (cached), runs it in lock-step through Code mode's hardware model |
+| `src/firmwareSpec.ts` | Wiring files, button presses and calibration sweep options |
 | `references/` | Reference photos of real mazes (kept local, not committed) |
 | `src/inputs.ts` | Reads project / track / robot files (validated like the website) |
 | `src/headless.ts` | Runs the website's simulation Engine without a browser |
