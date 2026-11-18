@@ -47,13 +47,43 @@ describe('session simulation (Robo-Run rules)', () => {
     expect(r.closestToFinish_m).toBeGreaterThan(1);
   }, 120_000);
 
-  it('restart penalty: 2 s per restart counted before the run (rule switchable)', async () => {
+  it('2027 penalties: 5 s per line crossing, 2 s per restart, 3 s per switch change (an adjustment); rule switchable', async () => {
     const c = comp((x) => { x.scoring.restartCounts = 'all-runs-before'; });
     const r = await runSession({ competition: c, seed: 1, base: base(loadGridMaze()), plan });
-    for (const run of r.runs.filter((x) => x.score_s !== null)) {
+    const scored = r.runs.filter((x) => x.score_s !== null);
+    expect(scored.length).toBeGreaterThan(2);
+    for (const run of scored) {
       expect(run.restartsBefore).toBe(run.index);
-      expect(run.score_s!).toBeCloseTo(run.runTime_s! * (1 + run.offLine / 20) + 2 * run.index, 2);
+      expect(run.score_s!).toBeCloseTo(run.runTime_s! + 5 * run.offLine + 2 * run.index + 3 * run.adjustmentsBefore, 2);
     }
+    // explore → memory 0.4 → memory 0.55: two switch changes, both in the scored part (no dry run in this plan)
+    expect(r.adjustments).toBe(2);
+  }, 120_000);
+
+  it('dry run: runs in the first x minutes are not scored and their restarts and switch changes do not count', async () => {
+    const r = await runSession({ competition: comp(), seed: 1, base: base(loadGridMaze()), plan: { ...plan, dry_s: 120 } });
+    const dry = r.runs.filter((x) => x.period === 'dry');
+    expect(dry.length).toBeGreaterThan(0);
+    expect(dry.every((x) => x.score_s === null && x.restartsBefore === 0)).toBe(true);
+    expect(dry[0].end).toBe('finished'); // explored the maze in the dry run
+    const actual = r.runs.filter((x) => x.period === 'actual');
+    expect(actual[0].phase).toBe('memory'); // the actual run starts from memory
+    expect(actual[0].begin_s).toBeGreaterThanOrEqual(120);
+    expect(r.finished).toBe(true);
+    // The 2026 rules have no dry run: the same plan scores from the start.
+    const r26 = await runSession({ competition: loadCompetition(new URL('../competition/roborun-2026.json', import.meta.url)), seed: 1, base: base(loadGridMaze()), plan: { ...plan, dry_s: 120 } });
+    expect(r26.runs[0].period).toBe('actual');
+  }, 120_000);
+
+  it('checkpoints: a run stopped short scores (time + penalties) / C of the furthest checkpoint covered', async () => {
+    // Dead-end track: put a checkpoint on the line; the operator gives up, the run is scored by the checkpoint.
+    const c = comp((x) => { x.operator.giveUpAfter_s = 2; x.session.access_s = 30; });
+    const r = await runSession({ competition: c, seed: 1, base: base(deadEnd(), {}, { algorithm: 'left-hand' }), plan, checkpoints: [{ x: 0.5, y: 0.125, C: 2 }] });
+    const run = r.runs.find((x) => x.checkpointScore !== null);
+    expect(run).toBeDefined();
+    expect(run!.checkpoint).toBe(2);
+    expect(r.finished).toBe(false);
+    expect(r.bestCheckpoint?.C).toBe(2);
   }, 120_000);
 
   it('the 10-minute limit includes setup: a session too short for the exploration run has no valid time', async () => {

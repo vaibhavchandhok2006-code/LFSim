@@ -55,7 +55,8 @@ export interface BenchSummary {
   finishRate: number; finishRateCI95: [number, number];
   officialTime_s: { median: number | null; p10: number | null; p90: number | null; mean: number | null };
   firstFinish_s: { median: number | null };
-  offLinePerValidRun: number; restartsPerSession: number;
+  offLinePerValidRun: number; restartsPerSession: number; adjustmentsPerSession: number;
+  checkpointsWithoutFinish: Record<string, number>; // sessions without a finish, by furthest checkpoint C (0 = none)
   byVariation: { name: string; sessions: number; finishRate: number; medianOfficial_s: number | null }[];
   byFeature: { feature: string; sessions: number; finishRate: number }[];
   failures: Record<string, number>; // how sessions without a valid time ended their runs
@@ -89,6 +90,8 @@ export function summarise(results: JobResult[], o: { setDir: string; part: Part 
     firstFinish_s: { median: quant(fin.map((r) => r.result!.firstFinish_s!), 0.5) },
     offLinePerValidRun: +(validRuns.reduce((a, x) => a + x.offLine, 0) / Math.max(1, validRuns.length)).toFixed(3),
     restartsPerSession: +(ok.reduce((a, r) => a + r.result!.restarts, 0) / Math.max(1, ok.length)).toFixed(3),
+    adjustmentsPerSession: +(ok.reduce((a, r) => a + r.result!.adjustments, 0) / Math.max(1, ok.length)).toFixed(3),
+    checkpointsWithoutFinish: ok.filter((r) => !r.result!.finished).reduce((acc, r) => { const k = String(Math.max(0, ...r.result!.runs.filter((x) => x.period === 'actual').map((x) => x.checkpoint))); acc[k] = (acc[k] ?? 0) + 1; return acc; }, {} as Record<string, number>),
     byVariation: VARIATIONS.map((v, i) => {
       const rs = results.filter((r) => r.variation === i);
       const f = rs.filter((r) => r.result?.finished);

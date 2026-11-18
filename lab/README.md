@@ -3,7 +3,7 @@
 Finds the best Robo-Run line follower by testing designs on many tracks without a browser. Spec:
 [LFSim Lab — Spec v1](https://claude.ai/artifact/7noPMWNsUYry7sCm8jCajX).
 
-Status: **Phase 1 done** — generated Robo-Run track sets, full 10-minute session benchmark with a report, photo
+Status: **Phase 1 done** (updated to the Shaastra Robo-Run 2027 rulebook: 4 m mat, dry run, new penalties, checkpoints) — generated Robo-Run track sets, full 10-minute session benchmark with a report, photo
 import from four corners. Phase 0: the simulator runs from the command line with the same results as the website.
 Next: Phase 2 (your real C firmware compiled and run inside the simulator).
 
@@ -14,10 +14,10 @@ npm run lab -- run --project my.lfsim.json --seconds 120 --csv run.csv --json ru
 npm run lab -- run --track public/samples/roborun-sample.png --robot my.robot.json
 npm run lab -- run --track photo.png --corners 47.5,37.8,96.6,53.1,73.6,103.3,1.6,69.7 --track-png flat.png
 
-npm run lab -- tracks make --out lab/tracksets/rr-v1        # 300 tuning + 200 held-out tracks (~15 min)
-npm run lab -- tracks check --set lab/tracksets/rr-v1
-npm run lab -- tracks sheet --set lab/tracksets/rr-v1       # review page with samples and statistics
-npm run lab -- bench --set lab/tracksets/rr-v1 --robot lab/examples/rmi-test-rig.robot.json --algorithm tremaux
+npm run lab -- tracks make --out lab/tracksets/rr-2027        # 300 tuning + 200 held-out tracks (~35 min)
+npm run lab -- tracks check --set lab/tracksets/rr-2027
+npm run lab -- tracks sheet --set lab/tracksets/rr-2027       # review page with samples and statistics
+npm run lab -- bench --set lab/tracksets/rr-2027 --robot lab/examples/rmi-test-rig.robot.json --algorithm tremaux
 ```
 
 A benchmark writes a results folder (default `results/<date>-<design>/`): `report.html` (finish rate with a 95 %
@@ -32,10 +32,10 @@ Windows setup: [docs/WINDOWS_SETUP.md](docs/WINDOWS_SETUP.md).
 | Folder | Holds |
 | --- | --- |
 | `src/cli.ts` | Command line (`run`, `tracks make/check/sheet`, `bench`, `doctor`) |
-| `competition/roborun.json` | Robo-Run rules as data (sizes, session, penalties; operator timings are estimates) |
+| `competition/roborun-2027.json` | Robo-Run rules as data (sizes, session, penalties; operator timings are estimates) |
 | `src/competition.ts` | Loads and checks a competition file; the rulebook's time score |
 | `src/tracks.ts` | Generated track → imported like an image → checked against the rules |
-| `src/tracksets.ts` | Track sets (PNG + manifest), tuning / held-out split, review sheet |
+| `src/tracksets.ts`, `trackWorker.ts` | Track sets (PNG + manifest, made on all cores), tuning / held-out split, checkpoints, review sheet |
 | `src/stats.ts` | Track statistics (junctions, loops, dead ends, curves) for real and generated tracks |
 | `src/session.ts` | A whole 10-minute session: exploration, memory runs, aborts, penalties, official time |
 | `src/design.ts` | Design files (robot + settings + switch plan) |

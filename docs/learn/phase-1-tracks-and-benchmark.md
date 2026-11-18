@@ -6,16 +6,16 @@ Phase 1 turns the simulator into a test bench. It can make hundreds of Robo-Run 
 10-minute session on each, and report how often it finishes and how fast.
 
 ```
-npm run lab -- tracks make --out lab/tracksets/rr-v1          # 300 tuning + 200 held-out mazes
-npm run lab -- tracks sheet --set lab/tracksets/rr-v1         # review page: do they look real?
-npm run lab -- bench --set lab/tracksets/rr-v1 --robot lab/examples/rmi-test-rig.robot.json --algorithm tremaux
+npm run lab -- tracks make --out lab/tracksets/rr-2027          # 300 tuning + 200 held-out mazes
+npm run lab -- tracks sheet --set lab/tracksets/rr-2027         # review page: do they look real?
+npm run lab -- bench --set lab/tracksets/rr-2027 --robot lab/examples/rmi-test-rig.robot.json --algorithm tremaux
 ```
 
 Parts:
 
 | Part | File | Idea |
 | --- | --- | --- |
-| Rules as data | `lab/competition/roborun.json` | The rulebook's numbers in a file the program reads, so another event is a new file, not new code |
+| Rules as data | `lab/competition/roborun-2027.json` | The rulebook's numbers in a file the program reads, so another event is a new file, not new code |
 | Track generator | `src/track/generate.ts` | Carve a maze on a grid, then draw each piece as a real feature |
 | Track checker | `lab/src/tracks.ts` | Prove every maze follows the rules before using it |
 | Session simulator | `lab/src/session.ts` | Play 10 minutes the way a team would |
@@ -75,3 +75,23 @@ pixel of the top-down track is looked up in the photo through that transform.
 2. Benchmark with `--algorithm lsrb` and then with `--algorithm tremaux`, and compare the two `report.html` files.
 3. Open one of the `projects/*.lfsim.json` files from a results folder in the LFSim website and watch the failed run.
 4. In the website, load a frame from a competition video, press *Mark the mat's corners*, and drag 1–4 onto the mat.
+
+## Update: the 2027 rulebook
+
+The Shaastra 2027 rules changed the problem, and because the rules live in a data file, most of the update was data,
+not code:
+
+- **Bigger mat:** 16 × 16 squares of 25 cm = 4 m × 4 m (was 2.5 m). Generated mazes grow from a 7 × 7 to an 11 × 11
+  junction lattice; the junction density per square metre stays like the reference maze.
+- **New penalties:** 5 s per line crossing (instead of a share of the run time), 2 s per restart, 3 s per adjustment.
+  Changing a switch counts as an adjustment, so climbing a speed ladder now costs time. Both worked examples in the
+  rulebook (68 s and 108 s) are unit tests.
+- **Dry run:** the 10 minutes can start with an unscored dry run. A maze-solving robot explores during it and then
+  races from memory in the scored part. How long the dry run should be is a design choice the optimiser will tune.
+- **Checkpoints:** a robot that does not finish is ranked by the furthest checkpoint it reached, with
+  (time + penalties) ÷ C.
+- **Finish position:** on real Shaastra mazes the finish is at the far end of the mat, usually near a bottom corner.
+  The generator now does that for 80 % of mazes and keeps some finishes inside the maze for variety.
+
+Lesson: keep rules as data and test them against the rulebook's own examples. When the rulebook changes, the tests
+show exactly what moved.

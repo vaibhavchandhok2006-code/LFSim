@@ -47,22 +47,28 @@ APIs · ordering parts automatically · other bots on the maze at the same time.
 **Later versions:** other competitions' rulebooks; 4WD and suction-fan physics; custom PCB layout; public packaging and
 setup wizard.
 
-## Robo-Run rules used (from the Shaastra Robo-Run problem statement)
+## Robo-Run rules used (Shaastra Robo-Run 2027 rulebook; updated 2026-11-18)
 
-Mat 10 × 10 grid of 25 cm squares, enclosed; lines black on white, 3–4 cm; start square fully black in a corner; start
-line between the first and second squares; timer starts when the bot's front edge crosses it and stops when the front
-edge enters the destination square; the destination has one pathway and is placed so a simple line follower cannot
-easily find it; multiple paths exist. Bot at most 20 × 20 cm, self-contained. 10 minutes of maze access including
-adjustments; multiple runs; every exit from the start square is a new run; re-entering the start square before the
-destination aborts the run; the fastest valid official time counts. After the maze is shown: no reprogramming or
-feeding maze information; switch settings (algorithm, speed), battery changes, sensor adjustments and repairs are
-allowed; weight may not change. Lighting is not fixed.
+Mat **16 × 16 grid of 25 cm squares (4 m × 4 m)**, enclosed; lines black on white, 3–4 cm; start square fully black
+in a corner; start line between the first and second squares; timer from the front edge crossing the start line to
+the front edge entering the destination; the destination is at the end of the maze track, has one pathway, a simple
+line follower cannot easily find it, multiple paths exist; features: 45° and 90° turns, intersections, dead ends,
+curves, curved turns (¼ or ½ circle), junctions. Bot at most 20 × 20 cm, self-contained, no camera. 10 minutes of
+access including adjustments (plus 1 minute of calibration, not counted); the 10 minutes are either 1 dry run (x min,
+not scored) + 1 actual run (10 − x min) or 2 actual runs (best counts); multiple runs; every exit from the start square
+is a new run; re-entering the start square aborts the run (restart penalty). First round time score = run time + 5 s
+per line crossing + 2 s per restart + 3 s per adjustment (changing switches, batteries, sensors or speed settings
+counts as an adjustment). Bots that do not reach the destination score (time + penalties) / C, C = value of the
+furthest checkpoint covered. Final round: restart 8 s, adjustment 5 s, and 15 s per yellow 10 cm block not pushed off
+its yellow square (blocks sit at dead ends; a cleared square becomes a checkpoint) — stored as data, not yet
+simulated. No reprogramming after the maze is shown; switches (algorithm, speed) allowed; weight may not change. The
+2026 edition (10 × 10 grid, off-line N/20 × run time) is kept as `roborun-2026.json`.
 
 ## Inputs, outputs and file formats
 
 | File | Format | Holds |
 | --- | --- | --- |
-| Competition profile | `competition/roborun.json` | The rules above as data: sizes, session length, penalties, abort rule, allowed changes |
+| Competition profile | `competition/roborun-2027.json` (and `roborun-2026.json`) | The rules above as data: sizes, session length, penalties, abort rule, allowed changes |
 | Track | `.track.json` (LFSim) + PNG | Top-down image at 2 mm/px, squares, generator seed and features |
 | Track set | `tracksets/<name>/` | Tracks split into tuning and held-out, plus a manifest and feature statistics |
 | Reference images | PNG/JPEG + 4 corner points | Shaastra photos, rectified to top-down |

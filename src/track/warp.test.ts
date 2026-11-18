@@ -26,7 +26,7 @@ describe('perspective correction', () => {
 
   it('an angled photo of a maze, flattened from its corners, gives back the same maze', () => {
     // Make a "photo": the maze seen at an angle (forward warp of a clean render into a trapezoid in a larger frame).
-    const maze = generateMaze({ seed: 77 });
+    const maze = generateMaze({ seed: 77, size_m: 2.5 });
     const clean = renderMaze(maze, 0.004); // 625 × 625
     const PW = 900, PH = 600;
     const quad: Quad = [[300, 60], [760, 140], [860, 560], [40, 470]];

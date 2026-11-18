@@ -14,10 +14,11 @@ export const FEATURES: Feature[] = ['straight', 'zigzag', 'arc', 'sbend', 'box',
 
 export interface GenOptions {
   seed: number;
-  size_m: number;          // mat side (Robo-Run: 10 × 25 cm = 2.5 m)
+  size_m: number;          // mat side (Robo-Run 2027: 16 × 25 cm = 4 m; 2026: 10 × 25 cm = 2.5 m)
   cell_m: number;          // rulebook unit square (start square sits in the corner cell)
   lineWidth_cm: [number, number]; // drawn width is chosen per maze in this range
-  lattice: number;         // junction lattice points per side
+  lattice?: number;        // junction lattice points per side (default: from the mat size, 1.5 cells apart)
+  finishEdgeP: number;     // chance the finish is at the far end of the mat (the rest: somewhere inside)
   dropFrac: [number, number]; // share of lattice points left unused
   loopFrac: [number, number]; // extra edges (loops) per used point
   diagonalP: number;       // chance a tree edge may be a diagonal
@@ -29,7 +30,7 @@ export interface GenOptions {
 }
 
 export const DEFAULT_GEN: Omit<GenOptions, 'seed'> = {
-  size_m: 2.5, cell_m: 0.25, lineWidth_cm: [3, 4], lattice: 7, dropFrac: [0.0, 0.08], loopFrac: [0.3, 0.55], diagonalP: 0.12,
+  size_m: 4, cell_m: 0.25, lineWidth_cm: [3, 4], finishEdgeP: 0.8, dropFrac: [0.0, 0.08], loopFrac: [0.3, 0.55], diagonalP: 0.12,
   edgeMix: { straight: 2.2, zigzag: 1.1, arc: 0.9, sbend: 1.1, box: 1.1, boxSide: 0.9, oval: 0.7, diamond: 0.8, triangles: 0.7, stub: 1.4, comb: 0.8 },
   ringP: 0.25, curveP: 0.7, squareSide_m: 0.2,
 };
@@ -53,18 +54,30 @@ export interface GeneratedMaze {
 
 interface LEdge { a: number; b: number; diag: boolean }
 
+export const latticeFor = (size_m: number, cell_m: number) => Math.round((size_m - cell_m) / (1.5 * cell_m)) + 1;
+
 function carve(o: GenOptions, rng: Rng) {
-  const K = o.lattice;
+  const K = o.lattice ?? latticeFor(o.size_m, o.cell_m);
   const id = (i: number, j: number) => j * K + i;
   const keep = new Array(K * K).fill(true);
   const drop = o.dropFrac[0] + rng.next() * (o.dropFrac[1] - o.dropFrac[0]);
   for (let n = 0; n < K * K; n += 1) if (n !== id(0, 0) && n !== id(1, 0) && n !== id(0, 1) && rng.next() < drop) keep[n] = false;
+  // The finish is usually at the far end of the mat (the bottom edge, start at the top-left), most often near one of the
+  // two bottom corners, as on Shaastra mazes; otherwise it is placed inside the maze. It is kept out of the tree and
+  // joined by a single line at the end, so it has one pathway.
+  let edgeFinish = -1;
+  if (rng.next() < o.finishEdgeP) {
+    const near = rng.next() < 0.7;
+    const cols = near ? [0, 1, 2, K - 3, K - 2, K - 1] : Array.from({ length: K }, (_, i) => i);
+    edgeFinish = id(cols[Math.floor(rng.next() * cols.length)], K - 1);
+    keep[edgeFinish] = true;
+  }
   const neighbours = (n: number, diag: boolean) => {
     const i = n % K, j = Math.floor(n / K), out: { m: number; diag: boolean }[] = [];
     const d4 = [[1, 0], [-1, 0], [0, 1], [0, -1]], dd = [[1, 1], [-1, 1], [1, -1], [-1, -1]];
     for (const [a, b] of d4) { const x = i + a, y = j + b; if (x >= 0 && y >= 0 && x < K && y < K) out.push({ m: id(x, y), diag: false }); }
     if (diag) for (const [a, b] of dd) { const x = i + a, y = j + b; if (x >= 0 && y >= 0 && x < K && y < K) out.push({ m: id(x, y), diag: true }); }
-    return out.filter((q) => keep[q.m] && q.m !== id(0, 0));
+    return out.filter((q) => keep[q.m] && q.m !== id(0, 0) && q.m !== edgeFinish);
   };
   const cellOf = (a: number, b: number) => Math.min(a % K, b % K) + Math.min(Math.floor(a / K), Math.floor(b / K)) * K;
   const diagCells = new Set<number>();
@@ -93,10 +106,20 @@ function carve(o: GenOptions, rng: Rng) {
   const hops = new Map<number, number>([[id(0, 0), 0]]);
   const q: number[] = [id(0, 0)];
   while (q.length) { const c = q.shift()!; for (const e of edges) { const m = e.a === c ? e.b : e.b === c ? e.a : -1; if (m >= 0 && !hops.has(m)) { hops.set(m, hops.get(c)! + 1); q.push(m); } } }
-  const leaves = used.filter((n) => n !== id(0, 0) && n !== first && degree(n) === 1).sort((a, b) => hops.get(b)! - hops.get(a)!);
-  if (!leaves.length) return null;
-  const pool = leaves.slice(0, Math.max(1, Math.ceil(leaves.length / 3)));
-  const finish = pool[Math.floor(rng.next() * pool.length)];
+  let finish: number;
+  if (edgeFinish >= 0) {
+    const i = edgeFinish % K;
+    const opts = [[i, K - 2], [i - 1, K - 1], [i + 1, K - 1]].filter(([x, y]) => x >= 0 && x < K && seen.has(id(x, y))).map(([x, y]) => id(x, y));
+    if (!opts.length) return null;
+    add(opts[Math.floor(rng.next() * opts.length)], edgeFinish, false);
+    seen.add(edgeFinish); used.push(edgeFinish);
+    finish = edgeFinish;
+  } else {
+    const leaves = used.filter((n) => n !== id(0, 0) && n !== first && degree(n) === 1).sort((a, b) => hops.get(b)! - hops.get(a)!);
+    if (!leaves.length) return null;
+    const pool = leaves.slice(0, Math.max(1, Math.ceil(leaves.length / 3)));
+    finish = pool[Math.floor(rng.next() * pool.length)];
+  }
   // Loops: extra edges between used points, never touching the start or the finish.
   const loopFrac = o.loopFrac[0] + rng.next() * (o.loopFrac[1] - o.loopFrac[0]);
   const want = Math.round(loopFrac * used.length);
@@ -323,7 +346,8 @@ export function generateMaze(opts: Partial<GenOptions> & { seed: number }): Gene
     } else nodeKind.set(n, { kind: 'plain', r: 0, spokes: [] });
   }
   const edgeFeat: Feature[] = lat.edges.map((e) => {
-    if (e.a === lat!.start || e.b === lat!.start) return 'straight';
+    // The lines out of the start square and into the finish square stay plain.
+    if (e.a === lat!.start || e.b === lat!.start || e.a === lat!.finish || e.b === lat!.finish) return e.diag ? 'diagonal' : 'straight';
     const f = pick(rng, o.edgeMix);
     if (e.diag) return f === 'zigzag' || f === 'stub' || f === 'arc' ? f : 'diagonal';
     return f;

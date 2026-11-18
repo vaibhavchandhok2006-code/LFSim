@@ -12,11 +12,12 @@ import { loadInputs } from './inputs';
 import { runHeadless } from './headless';
 import { parseImport } from '../../src/ui/persist';
 
-const c = loadCompetition();
+// The 2026 rules (2.5 m mazes) keep this test quick; the 2027 4 m mazes are covered in tracks.test.ts.
+const c = loadCompetition(new URL('../competition/roborun-2026.json', import.meta.url));
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lab-set-'));
 const design = designFromRobot(new URL('../examples/rmi-test-rig.robot.json', import.meta.url).pathname, { algorithm: 'tremaux' });
 
-beforeAll(() => { makeTrackSet(dir, 'test-set', c, { tune: 2, held: 3 }); }, 120_000);
+beforeAll(async () => { await makeTrackSet(dir, 'test-set', c, { tune: 2, held: 3 }); }, 300_000);
 
 describe('track sets', () => {
   it('keeps tuning and held-out tracks apart and every track passes the checks', () => {
@@ -58,7 +59,7 @@ describe('benchmark', () => {
     writeResults(out, { results: one, summary, design, competition: c, setDir: dir, part: 'held', variations: 2, command: 'test' });
     for (const f of ['summary.json', 'benchmark.csv', 'runs.csv', 'design.json', 'report.html']) expect(fs.existsSync(path.join(out, f))).toBe(true);
     expect(fs.readFileSync(path.join(out, 'benchmark.csv'), 'utf8').trim().split('\n').length).toBe(7);
-    // Replay: a failed run's project file, run headless, ends the same way at the same moment.
+    // Replay: a failed run's project file, run headless for the same time, ends at the same place.
     const projects = fs.readdirSync(path.join(out, 'projects'));
     let replayed = 0;
     for (const p of projects.slice(0, 3)) {
@@ -68,10 +69,9 @@ describe('benchmark', () => {
       const rec = one.find((r) => r.trackId === trackId && r.variation === Number(v))!.result!.runs[Number(run)];
       if (rec.phase !== 'explore') continue;
       const { start } = loadInputs({ project: file });
-      const { summary: s } = await runHeadless(start, { seconds: Math.min(600, rec.elapsed_s + 1), stopAtFinish: false });
-      const kind = { reentry: 'start-reentry', 'left-mat': 'left-mat', 'stopped-away': 'code-stopped' }[rec.end as string];
-      if (kind) { expect(s.events.find((ev) => ev.kind === kind)?.t).toBeCloseTo(rec.elapsed_s, 2); replayed += 1; }
-      else expect(s.simTime_s).toBeGreaterThanOrEqual(rec.elapsed_s);
+      const { engine } = await runHeadless(start, { seconds: rec.elapsed_s, stopAtFinish: false });
+      expect(Math.hypot(engine.sim.body.x - rec.where.x, engine.sim.body.y - rec.where.y)).toBeLessThan(0.02);
+      replayed += 1;
     }
     expect(replayed).toBeGreaterThanOrEqual(1);
   }, 600_000);

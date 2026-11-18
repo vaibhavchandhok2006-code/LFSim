@@ -20,7 +20,7 @@ export async function runJob(j: Job): Promise<JobResult> {
     if (!track) { track = loadSetTrack(j.setDir, j.entry, j.design.robot.axleFromFront_mm); if (cache.size > 40) cache.clear(); cache.set(key, track); }
     const seed = jobSeed(j.entry, j.variation);
     const result = await runSession({
-      competition: j.competition, seed, plan: j.design.plan,
+      competition: j.competition, seed, plan: j.design.plan, checkpoints: j.entry.checkpoints,
       base: {
         track, profile: j.design.robot, brain: { mode: 'settings', settings: j.design.settings }, flags: ALL_ON,
         disturbances: disturbancesFor(VARIATIONS[j.variation], seed), offLine_cm: 4, memory: {},

@@ -51,7 +51,7 @@ export function TrackPanel({ setup, track, messages, loading, imageSize, imageUr
 
       <Group title="Rules preset">
         <SelectField label="Preset" value={setup.presetId} onChange={(v) => set('presetId', v)}
-          options={[{ value: 'roborun', label: 'Robo-Run (Shaastra), 2.5 × 2.5 m' }, { value: 'custom', label: 'Custom size' }]} />
+          options={[{ value: 'roborun-2027', label: 'Robo-Run 2027 (Shaastra), 16 × 16 squares, 4 × 4 m' }, { value: 'roborun', label: 'Robo-Run 2026 (Shaastra), 10 × 10 squares, 2.5 × 2.5 m' }, { value: 'custom', label: 'Custom size' }]} />
         {setup.presetId === 'custom' && <>
           <NumField label="Track width" unit="m" value={setup.custom.width_m} min={0.3} step={0.1} onChange={(v) => setC('width_m', v)} />
           <NumField label="Track height" unit="m" value={setup.custom.height_m} min={0.3} step={0.1} onChange={(v) => setC('height_m', v)} />

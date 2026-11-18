@@ -18,7 +18,7 @@ export interface CodeSetup {
 }
 
 export interface TrackSetup {
-  presetId: 'roborun' | 'custom';
+  presetId: 'roborun' | 'roborun-2027' | 'custom';
   custom: { width_m: number; height_m: number; lineWidth_cm: number; maxRobotL_mm: number; maxRobotW_mm: number };
   imageName: string;
   normaliseWidth: boolean;
@@ -183,6 +183,10 @@ export function checkCorners(v: unknown): [number, number][] | null {
   return q.map(([x, y]) => [x, y]);
 }
 
+function checkPreset(v: unknown) {
+  if (v !== 'roborun' && v !== 'roborun-2027' && v !== 'custom') throw new Error('Unknown track preset (expected roborun, roborun-2027 or custom).');
+}
+
 function checkImage(u: unknown): string {
   if (typeof u !== 'string' || !/^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(u)) throw new Error('The embedded track image is not a PNG, JPEG or WebP data URL.');
   return u;
@@ -206,6 +210,7 @@ export function parseImport(text: string): Imported {
     const bad = badNumbers(DEFAULTS, settings);
     if (bad) throw new Error(`The project file has an invalid number at ${bad}.`);
     settings.track.corners = checkCorners(settings.track.corners);
+    checkPreset(settings.track.presetId);
     const problems = profileProblems(settings.profile);
     if (problems.length) throw new Error(`The project's robot has values out of range: ${problems.slice(0, 5).join(' ')}`);
     const runs = Array.isArray(j.runs) ? (j.runs as RunSummary[]).filter((r) => isObj(r) && typeof r.label === 'string').slice(0, 200) : [];
@@ -217,6 +222,7 @@ export function parseImport(text: string): Imported {
     const bad = badNumbers(DEFAULT_TRACK_SETUP, setup);
     if (bad) throw new Error(`The track file has an invalid number at ${bad}.`);
     setup.corners = checkCorners(setup.corners);
+    checkPreset(setup.presetId);
     return { kind: 'track', value: { lfsim: 'track', version: 1, setup, image: checkImage(j.image) } };
   }
   if (j.version === 1 && typeof j.wheelbase_mm === 'number') {

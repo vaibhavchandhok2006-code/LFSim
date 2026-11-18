@@ -15,11 +15,13 @@ export interface Design {
   notes: string;
 }
 
-// The default session plan: explore at the design's base speed, then memory runs on a ladder of faster speeds.
+// The default session plan: a dry run (2027: unscored) to explore at the design's base speed, then scored memory runs
+// on a ladder of faster speeds. Each switch change in the scored part costs an adjustment penalty, so the ladder is
+// short. The dry-run length is a design choice (the optimiser will tune it); default 5 minutes (estimate).
 export function defaultPlan(s: SettingsParams): SessionPlan {
   const b = s.baseSpeed;
-  const ladder = [b + 0.1, b + 0.2, b + 0.3].map((v) => Math.min(s.maxSpeed, +v.toFixed(2))).filter((v, i, a) => a.indexOf(v) === i);
-  return { explore: { name: `explore ${b}`, settings: {} }, memory: ladder.map((v) => ({ name: `memory ${v}`, settings: { baseSpeed: v } })) };
+  const ladder = [b + 0.1, b + 0.2].map((v) => Math.min(s.maxSpeed, +v.toFixed(2))).filter((v, i, a) => a.indexOf(v) === i);
+  return { explore: { name: `explore ${b}`, settings: {} }, memory: ladder.map((v) => ({ name: `memory ${v}`, settings: { baseSpeed: v } })), dry_s: 300 };
 }
 
 export function designFromRobot(robotFile: string | null, overrides: Partial<SettingsParams> = {}, name?: string): Design {
@@ -41,5 +43,6 @@ export function loadDesign(file: string): Design {
   const problems = profileProblems({ ...DEFAULT_PROFILE, ...d.robot });
   if (problems.length) throw new Error(`${file}: robot values out of range: ${problems.slice(0, 3).join(' ')}`);
   if (!d.plan?.explore || !Array.isArray(d.plan.memory) || d.plan.memory.length === 0 || d.plan.memory.length > 8) throw new Error(`${file}: the plan needs an explore setting and 1–8 memory settings.`);
+  if (d.plan.dry_s !== undefined && !(typeof d.plan.dry_s === 'number' && d.plan.dry_s >= 0 && d.plan.dry_s <= 600)) throw new Error(`${file}: plan.dry_s must be 0–600 seconds.`);
   return { ...d, robot: { ...DEFAULT_PROFILE, ...d.robot }, settings: { ...DEFAULT_SETTINGS, ...d.settings } };
 }

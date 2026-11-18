@@ -9,6 +9,7 @@ import { warpGray, type Quad } from './warp';
 
 export function presetFor(setup: TrackSetup): TrackPreset {
   if (setup.presetId === 'roborun') return PRESETS[0];
+  if (setup.presetId === 'roborun-2027') return PRESETS[2];
   return { ...PRESETS[1], ...setup.custom };
 }
 

@@ -5,7 +5,7 @@ export interface RectPx { x0: number; y0: number; x1: number; y1: number }
 export interface Pose { x: number; y: number; theta: number } // metres, radians; image frame (x right, y down)
 
 export interface TrackPreset {
-  id: 'roborun' | 'custom';
+  id: 'roborun' | 'roborun-2027' | 'custom';
   name: string;
   width_m: number;
   height_m: number;
@@ -15,8 +15,9 @@ export interface TrackPreset {
 }
 
 export const PRESETS: TrackPreset[] = [
-  { id: 'roborun', name: 'Robo-Run (Shaastra)', width_m: 2.5, height_m: 2.5, lineWidth_cm: 3.8, maxRobotL_mm: 200, maxRobotW_mm: 200 },
+  { id: 'roborun', name: 'Robo-Run 2026 (Shaastra)', width_m: 2.5, height_m: 2.5, lineWidth_cm: 3.8, maxRobotL_mm: 200, maxRobotW_mm: 200 },
   { id: 'custom', name: 'Custom', width_m: 2.5, height_m: 2.5, lineWidth_cm: 3.8, maxRobotL_mm: 250, maxRobotW_mm: 250 },
+  { id: 'roborun-2027', name: 'Robo-Run 2027 (Shaastra)', width_m: 4, height_m: 4, lineWidth_cm: 3.5, maxRobotL_mm: 200, maxRobotW_mm: 200 },
 ];
 
 export interface Track {

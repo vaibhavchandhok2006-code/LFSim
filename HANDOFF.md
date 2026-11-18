@@ -8,11 +8,11 @@ Live app: https://vaibhavchandhok2006-code.github.io/LFSim/ · Spec: `docs/LFSim
   documented limit on the dense Robo-Run sample (below). 77 automated tests and the browser smoke test pass.
 - **LFSim Lab** (spec: `docs/lab/SPEC.md`, how-to: `lab/README.md`):
   - Phase 0 done 2026-11-16: headless command line identical to the website; Windows laptop set up.
-  - Phase 1 built 2026-11-18: Robo-Run rules as data (`lab/competition/roborun.json`), maze generator + rule checker,
-    track set `lab/tracksets/rr-v1` (300 tuning / 200 held-out, regenerate with `tracks make`, not committed), full
+  - Phase 1 built 2026-11-18: Robo-Run rules as data (`lab/competition/roborun-2027.json`; 2026 kept), maze generator + rule checker,
+    track set `lab/tracksets/rr-2027` (300 tuning / 200 held-out, regenerate with `tracks make`, not committed), full
     10-minute session simulation, parallel benchmark with HTML report and replay projects, photo import from four
     corners (website Track tab and `run --corners`). Results in VALIDATION.md.
-  - Waiting on you: review ~20 sample tracks (`npm run lab -- tracks sheet --set lab/tracksets/rr-v1`, open
+  - Waiting on you: review ~20 sample tracks (`npm run lab -- tracks sheet --set lab/tracksets/rr-2027`, open
     `sheet.html`). Ask the organisers: worked example 54 s vs formula 56 s; restart counting span.
   - Reference photos are kept in `lab/references/` (git-ignored).
 - Reality check against the real robot when it is free (LFSim Lab Phase 3).

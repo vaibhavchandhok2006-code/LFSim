@@ -5,6 +5,7 @@ import { PRESETS, type Track } from '../../src/track/track';
 import { adjacency, buildGraph, runRule, shortestPath, type JunctionGraph } from '../../src/track/graph';
 import { DEFAULT_PROFILE } from '../../src/sim/profile';
 import type { Competition } from './competition';
+import type { Checkpoint } from './session';
 
 export interface TrackCheck {
   ok: boolean;
@@ -17,7 +18,28 @@ export interface TrackCheck {
   cycles: number;         // independent loops (edges − nodes + 1)
 }
 
-export interface GeneratedTrack { maze: GeneratedMaze; track: Track; graph: JunctionGraph; check: TrackCheck; gray: Uint8ClampedArray }
+export interface GeneratedTrack { maze: GeneratedMaze; track: Track; graph: JunctionGraph; check: TrackCheck; gray: Uint8ClampedArray; checkpoints: Checkpoint[] }
+
+// Checkpoints (2027 rules): their places and values are told at the start of a match. Assumption: three, on the
+// shortest route at 25 %, 50 % and 75 % of its length, worth C = 1, 2, 3 (the nearer the destination, the higher).
+export function checkpointsFor(g: JunctionGraph): Checkpoint[] {
+  const sp = shortestPath(g);
+  if (!sp.ok) return [];
+  const pts: [number, number][] = [];
+  for (const r of sp.route) {
+    const e = g.edges[r.edge];
+    const p = r.dir > 0 ? e.pts : [...e.pts].reverse();
+    for (const q of p) pts.push([q[0], q[1]]);
+  }
+  const out: Checkpoint[] = [];
+  let acc = 0, k = 0;
+  const targets = [0.25, 0.5, 0.75].map((f) => f * sp.length_m);
+  for (let i = 1; i < pts.length && k < targets.length; i += 1) {
+    acc += Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]);
+    if (acc >= targets[k]) { out.push({ x: +pts[i][0].toFixed(3), y: +pts[i][1].toFixed(3), C: k + 1 }); k += 1; }
+  }
+  return out;
+}
 
 // A plain line follower "easily finds" the finish if a wall-following rule reaches it without travelling much more than
 // the shortest route. Assumption (the rulebook gives no number): it must need at least this factor.
@@ -78,7 +100,7 @@ export function checkTrack(track: Track, g: JunctionGraph, c: Competition): Trac
 // Draw a maze and import it the same way the website imports an image (2 mm/px, line width kept as drawn).
 export function trackFromMaze(maze: GeneratedMaze, name: string): { track: Track; gray: Uint8ClampedArray } {
   const { gray, width, height } = renderMaze(maze, 0.002);
-  const preset = { ...PRESETS[0], lineWidth_cm: +(maze.lineWidth_m * 100).toFixed(2) };
+  const preset = { ...PRESETS[0], width_m: maze.size_m, height_m: maze.size_m, lineWidth_cm: +(maze.lineWidth_m * 100).toFixed(2) };
   const { track } = processTrack(gray, width, height, preset, { normaliseWidth: false, imageName: name });
   track.startPose = startPoseFor(track, DEFAULT_PROFILE.axleFromFront_mm / 1000);
   return { track, gray };
@@ -95,7 +117,7 @@ export function generateTrack(seed: number, c: Competition, gen: Partial<GenOpti
     const { track, gray } = trackFromMaze(maze, `gen-${seed}.png`);
     const graph = buildGraph(track);
     const check = checkTrack(track, graph, c);
-    if (check.ok) return { maze, track, graph, check, gray, subSeed: sub, rejected };
+    if (check.ok) return { maze, track, graph, check, gray, checkpoints: checkpointsFor(graph), subSeed: sub, rejected };
     rejected.push(`${sub}: ${check.problems.join('; ')}`);
   }
   throw new Error(`No valid maze for seed ${seed} in ${maxTries} tries: ${rejected.slice(-3).join(' | ')}`);

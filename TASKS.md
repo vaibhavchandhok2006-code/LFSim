@@ -28,8 +28,11 @@ browser smoke test passes. Next: reality check against the real robot.
 - [x] Phase 1: competition profile (rules as data), track generator + rule checker, track sets (300 tuning / 200
       held-out), full 10-minute session simulation, parallel benchmark with report, live progress page, replay projects,
       review sheet, photo import from four corners (website + command line)
+- [x] Robo-Run 2027 rulebook: 4 m mat, new penalties, dry run, switch changes as adjustments, checkpoints; finish at the
+      far end on most generated mazes (generator v2), new track set `rr-2027`
 - [ ] Phase 1 sign-off: you review ~20 sample tracks (`tracks sheet`) and confirm they look like Shaastra mazes
-- [ ] Ask the organisers: worked example 54 s vs formula 56 s; over what span restarts are counted
+- [ ] Later: final-round yellow blocks (pushing physics, colour sensor), loop-case checkpoint placement
+- [ ] Ask the organisers: over what span restarts and adjustments are counted; checkpoint places and values; whether a switch change before the first actual run is an adjustment
 - [ ] Phase 2: real C firmware (ESP-IDF / Arduino) compiled and run in the simulator; Code-mode sessions with switches
 - [ ] Phase 3–8: see the spec
 - Findings for later phases: the current robot with LSRB / Trémaux often drives back into the start square (aborts

@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 // LFSim Lab command line.
 //   npm run lab -- run --project my.lfsim.json --seconds 120 --csv out.csv --json out.json
-//   npm run lab -- tracks make --out lab/tracksets/rr-v1
-//   npm run lab -- bench --set lab/tracksets/rr-v1 --robot lab/examples/rmi-test-rig.robot.json
+//   npm run lab -- tracks make --out lab/tracksets/rr-2027
+//   npm run lab -- bench --set lab/tracksets/rr-2027 --robot lab/examples/rmi-test-rig.robot.json
 //   npm run lab -- doctor
 import fs from 'node:fs';
 import path from 'node:path';
@@ -36,7 +36,8 @@ tracks make options
   --out <folder>                where to write the set (PNG tracks + manifest.json)
   --tune <n> --held <n>         tracks in each part (default 300 and 200)
   --name <text>                 set name (default: the folder name)
-  --competition <file.json>     rules file (default: lab/competition/roborun.json)
+  --workers <n>                 parallel workers (default: CPU cores − 1)
+  --competition <file.json>     rules file (default: lab/competition/roborun-2027.json)
 
 bench options
   --set <folder>                track set
@@ -45,6 +46,9 @@ bench options
   --design <file.design.json>   a full design (robot, settings, switch plan)
   --algorithm <name>            maze algorithm for a robot-file design (default lsrb)
   --base-speed <0..1>           exploration speed for a robot-file design
+  --dry <seconds>               2027 dry run (unscored) at the start of the 10 minutes (default 300; 0 = all scored)
+  --round first|final           which round's scoring (default first)
+  --competition <file.json>     rules file (default: lab/competition/roborun-2027.json)
   --variations 1|2|3            mat variations per track (default 3: clean, uneven light, harsh)
   --limit <n>                   only the first n tracks (quick check)
   --workers <n>                 parallel workers (default: CPU cores − 1; 0 = one thread)
@@ -141,18 +145,24 @@ export async function main(argv: string[]): Promise<number> {
 }
 
 const onlyFlags = (flags: Map<string, string | true>, known: string[]) => { for (const k of flags.keys()) if (!known.includes(k)) throw new Error(`Unknown option --${k}`); };
-const competitionFrom = (flags: Map<string, string | true>) => { const f = str(flags, 'competition'); return f ? parseCompetition(fs.readFileSync(f, 'utf8')) : loadCompetition(); };
+const competitionFrom = (flags: Map<string, string | true>) => {
+  const f = str(flags, 'competition'), round = str(flags, 'round') ?? 'first';
+  if (round !== 'first' && round !== 'final') throw new Error('--round must be first or final.');
+  return f ? parseCompetition(fs.readFileSync(f, 'utf8'), round) : loadCompetition(undefined, round);
+};
 
-function tracksCmd(cmd: string, flags: Map<string, string | true>): number {
+async function tracksCmd(cmd: string, flags: Map<string, string | true>): Promise<number> {
   if (cmd === 'tracks make') {
-    onlyFlags(flags, ['out', 'tune', 'held', 'name', 'competition']);
+    onlyFlags(flags, ['out', 'tune', 'held', 'name', 'competition', 'workers']);
     const out = str(flags, 'out'); if (!out) throw new Error('--out <folder> is needed.');
     if (fs.existsSync(path.join(out, 'manifest.json'))) throw new Error(`${out} already holds a track set; choose a new folder.`);
     const tune = num(flags, 'tune') ?? 300, held = num(flags, 'held') ?? 200;
     if (!(Number.isInteger(tune) && Number.isInteger(held) && tune >= 0 && held >= 0 && tune <= 5000 && held <= 5000 && tune + held > 0)) throw new Error('--tune and --held must be whole numbers from 0 to 5000.');
     const c = competitionFrom(flags);
     const t0 = Date.now();
-    const m = makeTrackSet(out, str(flags, 'name') ?? path.basename(out), c, { tune, held }, (d, t) => { if (d % 10 === 0 || d === t) process.stdout.write(`\r${d}/${t} tracks`); });
+    const workers = num(flags, 'workers');
+    if (workers !== undefined && !(Number.isInteger(workers) && workers >= 0 && workers <= 256)) throw new Error('--workers must be a whole number from 0 to 256.');
+    const m = await makeTrackSet(out, str(flags, 'name') ?? path.basename(out), c, { tune, held }, (d, t) => { if (d % 10 === 0 || d === t) process.stdout.write(`\r${d}/${t} tracks`); }, workers);
     process.stdout.write(`\nwrote ${m.entries.length} tracks to ${out} in ${((Date.now() - t0) / 1000).toFixed(0)} s\n`);
     return 0;
   }
@@ -177,8 +187,8 @@ function tracksCmd(cmd: string, flags: Map<string, string | true>): number {
 }
 
 async function benchCmd(flags: Map<string, string | true>): Promise<number> {
-  onlyFlags(flags, ['set', 'part', 'robot', 'design', 'algorithm', 'base-speed', 'variations', 'limit', 'workers', 'out', 'competition']);
-  const set = str(flags, 'set'); if (!set) throw new Error('--set <folder> is needed (make one with: npm run lab -- tracks make --out lab/tracksets/rr-v1).');
+  onlyFlags(flags, ['set', 'part', 'robot', 'design', 'algorithm', 'base-speed', 'dry', 'variations', 'limit', 'workers', 'out', 'competition', 'round']);
+  const set = str(flags, 'set'); if (!set) throw new Error('--set <folder> is needed (make one with: npm run lab -- tracks make --out lab/tracksets/rr-2027).');
   const part = (str(flags, 'part') ?? 'held') as Part; if (part !== 'tune' && part !== 'held') throw new Error('--part must be tune or held.');
   const algorithm = str(flags, 'algorithm');
   if (algorithm !== undefined && !ALGORITHMS.includes(algorithm as Algorithm)) throw new Error(`--algorithm must be one of: ${ALGORITHMS.join(', ')}`);
@@ -186,6 +196,8 @@ async function benchCmd(flags: Map<string, string | true>): Promise<number> {
   const dFile = str(flags, 'design');
   if (dFile && (flags.has('robot') || algorithm || bs !== undefined)) throw new Error('Give --design, or --robot with --algorithm/--base-speed, not both.');
   const design = dFile ? loadDesign(dFile) : designFromRobot(str(flags, 'robot') ?? null, { ...(algorithm ? { algorithm: algorithm as Algorithm } : {}), ...(bs !== undefined ? { baseSpeed: bs } : {}) });
+  const dry = num(flags, 'dry');
+  if (dry !== undefined) { if (!(dry >= 0 && dry <= 600)) throw new Error('--dry must be 0–600 seconds.'); design.plan.dry_s = dry; }
   const variations = num(flags, 'variations') ?? 3;
   if (![1, 2, 3].includes(variations)) throw new Error('--variations must be 1, 2 or 3.');
   const limit = num(flags, 'limit'), workers = num(flags, 'workers');

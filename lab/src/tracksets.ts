@@ -1,6 +1,8 @@
 // Track sets: generated tracks saved as PNG images plus a manifest, split into a tuning part and a held-out part that
 // never share a seed. The final numbers of any design come from the held-out part only.
 import fs from 'node:fs';
+import os from 'node:os';
+import { Worker } from 'node:worker_threads';
 import path from 'node:path';
 import { PNG } from 'pngjs';
 import { processTrack, startPoseFor } from '../../src/track/importTrack';
@@ -9,10 +11,11 @@ import { DEFAULT_PROFILE } from '../../src/sim/profile';
 import { buildGraph } from '../../src/track/graph';
 import type { Feature } from '../../src/track/generate';
 import type { Competition } from './competition';
+import type { Checkpoint } from './session';
 import { generateTrack, checkTrack, type TrackCheck } from './tracks';
 import { trackStats, type TrackStats } from './stats';
 
-export const GENERATOR_VERSION = 1; // bump when the generator's output for a seed changes
+export const GENERATOR_VERSION = 2; // 2: Robo-Run 2027 (4 m mat), finish mostly at the far end, checkpoints // bump when the generator's output for a seed changes
 export const HELD_OUT_SEED_BASE = 1_000_000; // held-out seeds start here; tuning seeds start at 1
 
 export type Part = 'tune' | 'held';
@@ -21,7 +24,9 @@ export interface SetEntry {
   part: Part;
   seed: number;             // generator seed (the sub-seed that passed the checks)
   file: string;             // PNG, relative to the set folder
+  size_m: number;           // mat side
   lineWidth_cm: number;
+  checkpoints: Checkpoint[];
   corner: string;
   features: Partial<Record<Feature, number>>;
   check: TrackCheck;
@@ -43,21 +48,46 @@ export function writePng(file: string, gray: Uint8ClampedArray, w: number, h: nu
   fs.writeFileSync(file, PNG.sync.write(png, { colorType: 0, inputColorType: 6 }));
 }
 
-export function makeTrackSet(dir: string, name: string, c: Competition, counts: { tune: number; held: number }, onProgress?: (done: number, total: number) => void): TrackSetManifest {
+export interface TrackJob { part: Part; k: number; seed: number; dir: string; competition: Competition }
+
+// Generate one track of a set and save its PNG (runs on a worker thread when the set is made in parallel).
+export function makeOne(j: TrackJob): SetEntry {
+  const t = generateTrack(j.seed, j.competition);
+  const id = `${j.part}-${String(j.k + 1).padStart(4, '0')}`;
+  const file = `tracks/${id}.png`;
+  writePng(path.join(j.dir, file), t.gray, t.track.w, t.track.h);
+  return {
+    id, part: j.part, seed: t.subSeed, file, size_m: t.maze.size_m, checkpoints: t.checkpoints,
+    lineWidth_cm: +(t.maze.lineWidth_m * 100).toFixed(2), corner: t.maze.corner, features: t.maze.features, check: t.check, stats: trackStats(t.track, t.graph),
+  };
+}
+
+export async function makeTrackSet(dir: string, name: string, c: Competition, counts: { tune: number; held: number }, onProgress?: (done: number, total: number) => void, workers = Math.max(1, os.availableParallelism() - 1)): Promise<TrackSetManifest> {
   fs.mkdirSync(path.join(dir, 'tracks'), { recursive: true });
-  const entries: SetEntry[] = [];
-  const total = counts.tune + counts.held;
-  const jobs: { part: Part; k: number; seed: number }[] = [
-    ...Array.from({ length: counts.tune }, (_, k) => ({ part: 'tune' as Part, k, seed: 1 + k })),
-    ...Array.from({ length: counts.held }, (_, k) => ({ part: 'held' as Part, k, seed: HELD_OUT_SEED_BASE + 1 + k })),
+  const jobs: TrackJob[] = [
+    ...Array.from({ length: counts.tune }, (_, k) => ({ part: 'tune' as Part, k, seed: 1 + k, dir, competition: c })),
+    ...Array.from({ length: counts.held }, (_, k) => ({ part: 'held' as Part, k, seed: HELD_OUT_SEED_BASE + 1 + k, dir, competition: c })),
   ];
-  for (const j of jobs) {
-    const t = generateTrack(j.seed, c);
-    const id = `${j.part}-${String(j.k + 1).padStart(4, '0')}`;
-    const file = `tracks/${id}.png`;
-    writePng(path.join(dir, file), t.gray, t.track.w, t.track.h);
-    entries.push({ id, part: j.part, seed: t.subSeed, file, lineWidth_cm: +(t.maze.lineWidth_m * 100).toFixed(2), corner: t.maze.corner, features: t.maze.features, check: t.check, stats: trackStats(t.track, t.graph) });
-    onProgress?.(entries.length, total);
+  const entries: SetEntry[] = new Array(jobs.length);
+  let done = 0;
+  if (workers <= 0 || jobs.length < 2) {
+    jobs.forEach((j, i) => { entries[i] = makeOne(j); onProgress?.(++done, jobs.length); });
+  } else {
+    await new Promise<void>((resolve, reject) => {
+      let next = 0;
+      const pool: Worker[] = [];
+      const feed = (w: Worker) => { if (next < jobs.length) { const i = next++; w.postMessage({ i, job: jobs[i] }); } };
+      for (let k = 0; k < Math.min(workers, jobs.length); k += 1) {
+        const w = new Worker(new URL('./trackWorker.ts', import.meta.url), { execArgv: ['--import', 'tsx'] });
+        w.on('message', (m: { i: number; entry?: SetEntry; error?: string }) => {
+          if (m.error) { for (const p of pool) void p.terminate(); reject(new Error(m.error)); return; }
+          entries[m.i] = m.entry!; onProgress?.(++done, jobs.length);
+          if (done === jobs.length) { for (const p of pool) void p.terminate(); resolve(); } else feed(w);
+        });
+        w.on('error', (e) => { for (const p of pool) void p.terminate(); reject(e); });
+        pool.push(w); feed(w);
+      }
+    });
   }
   const m: TrackSetManifest = { schema: 'lfsim-lab/trackset', version: 1, name, generatorVersion: GENERATOR_VERSION, competition: c.id, created: new Date().toISOString(), entries };
   fs.writeFileSync(path.join(dir, 'manifest.json'), JSON.stringify(m, null, 1));
@@ -70,10 +100,13 @@ export function loadTrackSet(dir: string): TrackSetManifest {
   if (fs.statSync(file).size > 50 * 1024 * 1024) throw new Error('Track set manifest too large.');
   const m = JSON.parse(fs.readFileSync(file, 'utf8')) as TrackSetManifest;
   if (m.schema !== 'lfsim-lab/trackset' || m.version !== 1 || !Array.isArray(m.entries)) throw new Error(`${file}: not a version-1 track set manifest.`);
+  if (m.generatorVersion !== GENERATOR_VERSION) throw new Error(`${file}: made by generator version ${m.generatorVersion}; this build is version ${GENERATOR_VERSION}. Make a new set.`);
   for (const e of m.entries) {
     if (typeof e.id !== 'string' || !/^(tune|held)-\d{4}$/.test(e.id) || (e.part !== 'tune' && e.part !== 'held')) throw new Error(`${file}: bad entry id or part.`);
     if (typeof e.file !== 'string' || !/^tracks\/(tune|held)-\d{4}\.png$/.test(e.file)) throw new Error(`${file}: bad track file name for ${e.id}.`);
     if (!(e.lineWidth_cm >= 1 && e.lineWidth_cm <= 10)) throw new Error(`${file}: bad line width for ${e.id}.`);
+    if (!(e.size_m >= 0.5 && e.size_m <= 10)) throw new Error(`${file}: bad mat size for ${e.id}.`);
+    if (!Array.isArray(e.checkpoints) || e.checkpoints.length > 20 || !e.checkpoints.every((c) => [c.x, c.y, c.C].every((v) => typeof v === 'number' && Number.isFinite(v)))) throw new Error(`${file}: bad checkpoints for ${e.id}.`);
   }
   // Tuning and held-out tracks must never share a seed (F6).
   const tuneSeeds = new Set(m.entries.filter((e) => e.part === 'tune').map((e) => Math.floor(e.seed / 1000)));
@@ -86,7 +119,7 @@ export function loadSetTrack(dir: string, e: SetEntry, axleFromFront_mm = DEFAUL
   const png = PNG.sync.read(fs.readFileSync(path.join(dir, e.file)));
   const gray = new Uint8ClampedArray(png.width * png.height);
   for (let i = 0; i < gray.length; i += 1) gray[i] = png.data[i * 4];
-  const { track } = processTrack(gray, png.width, png.height, { ...PRESETS[0], lineWidth_cm: e.lineWidth_cm }, { normaliseWidth: false, imageName: `${e.id}.png` });
+  const { track } = processTrack(gray, png.width, png.height, { ...PRESETS[0], width_m: e.size_m, height_m: e.size_m, lineWidth_cm: e.lineWidth_cm }, { normaliseWidth: false, imageName: `${e.id}.png` });
   track.startPose = startPoseFor(track, axleFromFront_mm / 1000);
   return track;
 }
