@@ -88,9 +88,12 @@ export function templateVariant(t: Template, o: VariantOptions): GeneratedMaze {
   // The squares are drawn at most 25 cm (one rulebook square); a line that ended at the larger square's edge is
   // continued to its centre so it still joins the square.
   const sqSide = Math.min(0.25, t.start.side * s);
+  // The joining line is found by distance in the template's own scale (the trace stops a few cm short of the square's
+  // edge; scaling the maze up scales that gap too).
   for (const q of [{ c: S0, side: t.start.side * s }, { c: F0, side: t.finish.side * s }]) {
-    const inSq = (p: P2) => Math.max(Math.abs(p[0] - q.c.x), Math.abs(p[1] - q.c.y)) <= q.side / 2 + 0.03;
+    const inSq = (p: P2) => Math.max(Math.abs(p[0] - q.c.x), Math.abs(p[1] - q.c.y)) <= q.side / 2 + 0.03 * Math.max(1, s);
     lines = lines.map((l) => (inSq(l[0]) ? [[q.c.x, q.c.y] as P2, ...l] : inSq(l[l.length - 1]) ? [...l, [q.c.x, q.c.y] as P2] : l));
+    if (!lines.some((l) => [l[0], l[l.length - 1]].some((p) => p[0] === q.c.x && p[1] === q.c.y))) throw new Error('template: no line joins a square');
   }
   const minSep = lw + 0.035;
   const counts: Record<string, number> = {};

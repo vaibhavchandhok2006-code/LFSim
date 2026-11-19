@@ -116,6 +116,14 @@ export class NativeFirmwareBrain extends FirmwareBrain {
         if (m.f === '__log') { const fn = api[`ESP_LOG${m.a[0]}`] as ((t: string, f: string, ...a: unknown[]) => void) | undefined; fn?.(String(m.a[1]), '%s', m.a[2]); continue; }
         if (m.f === '__fail') throw new Error(String(m.a[0]));
         if (m.f.startsWith('__nvs_')) { this.nvs(m.f, m.a, child); continue; }
+        if (m.f === '__cost') { this.spend(Number(m.a[0]) / 1e6); continue; }
+        if (m.f === '__snap') { child.stdin.write(this.snapLine(Number(m.a[0]), String(m.a[1]), handles)); continue; }
+        if (m.f === '__delay') { // vTaskDelay with fast I/O: spend the firmware's CPU time, wait, reply with a snapshot
+          this.spend(Number(m.a[0]) / 1e6);
+          await (api.vTaskDelay as (ms: number) => Promise<void>)(Number(m.a[1]));
+          child.stdin.write(this.snapLine(0, 'none', handles));
+          continue;
+        }
         const fn = api[m.f];
         if (typeof fn !== 'function') throw new Error(`${m.f}() is not simulated yet.`);
         const args = m.a.map(conv);
@@ -139,7 +147,7 @@ export class NativeFirmwareBrain extends FirmwareBrain {
     const k = (key: unknown) => `nvs/${ns}/${String(key)}`;
     if (f === '__nvs_set') {
       const hex = String(a[3]);
-      if (!/^[0-9a-f]*$/.test(hex) || hex.length > 8000) throw new Error('Firmware wrote an invalid value to flash.');
+      if (!/^[0-9a-f]*$/.test(hex) || hex.length > 32000) throw new Error('Firmware wrote an invalid value to flash.');
       flash[k(a[1])] = { type: String(a[2]), hex };
     } else if (f === '__nvs_get') {
       const v = flash[k(a[1])] as { type: string; hex: string } | undefined;
@@ -150,5 +158,23 @@ export class NativeFirmwareBrain extends FirmwareBrain {
       const prefix = ns === '*' ? 'nvs/' : a[1] === null ? `nvs/${ns}/` : k(a[1]);
       for (const key of Object.keys(flash)) if (a[1] === null || ns === '*' ? key.startsWith(prefix) : key === prefix) delete flash[key];
     } else throw new Error(`${f}() is not simulated.`);
+  }
+
+  // Fast I/O (LFSIM_FAST_IO): everything the firmware reads in this physics tick, in one line:
+  // S <tick left µs> <now µs> <ADC read cost µs> <call cost µs> <n> {<adc handle> <channel> <value>}… <m> {<pcnt unit> <count>}…
+  private snapLine(flush_us: number, first: string, handles: unknown[]): string {
+    const first_s = first === 'adc' ? (this.wiring.board === 'avr' ? 112e-6 : 10e-6) : first === 'pcnt' ? 0.5e-6 : 0;
+    const sn = this.snapshot(flush_us / 1e6, first_s);
+    const adc: string[] = [];
+    handles.forEach((h, id) => {
+      const unit = (h as { unit?: number } | null)?.unit;
+      if (unit !== 1 && unit !== 2) return;
+      for (const a of this.wiring.adcChannels) if (a.unit === unit) {
+        const i = this.wiring.sensorPins.indexOf(a.gpio);
+        if (i >= 0) adc.push(`${id} ${a.channel} ${sn.sensors[i]}`);
+      }
+    });
+    const pc = sn.pcnt.map((p) => `${p.unit} ${p.count}`);
+    return `S ${(sn.tickLeft_s * 1e6).toFixed(3)} ${sn.now_us} ${sn.costAdc_s * 1e6} ${sn.costCall_s * 1e6} ${adc.length} ${adc.join(' ')} ${pc.length} ${pc.join(' ')}\n`;
   }
 }

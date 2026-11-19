@@ -24,7 +24,7 @@ export class FirmwareBrain implements Brain {
   readonly loopHz = 0; // the firmware drives time itself
   private sim!: Simulation;
   private profile: RobotProfile;
-  private wiring: Wiring;
+  protected wiring: Wiring;
   private code: string;
   private pending = 0;              // simulated CPU time not yet run as physics, s
   private until = 0;
@@ -109,7 +109,7 @@ export class FirmwareBrain implements Brain {
     if (!this.started) { this.started = true; this.main(); }
     else if (this.gate) { const g = this.gate; this.gate = null; g(); }
     // wait until the firmware parks at the gate again, ends, or fails
-    while (!this.gate && !this.done && !this.failure) await new Promise((r) => setTimeout(r, 0));
+    while (!this.gate && !this.done && !this.failure) await new Promise((r) => (typeof setImmediate === 'function' ? setImmediate(r) : setTimeout(r, 0)));
     if (this.failure) throw this.failure;
   }
 
@@ -131,6 +131,25 @@ export class FirmwareBrain implements Brain {
       this.sim.events.push({ t: this.sim.time, kind: 'log', text: `Firmware error: ${this.failure.message}`, x: this.sim.body.x, y: this.sim.body.y });
     }
   }
+
+  // ---------------- fast native I/O (LFSim Lab) ----------------
+  // One snapshot of everything a firmware reads, valid until the next physics tick: run `flush_s` of CPU time the
+  // firmware spent since its last call, then `first_s` (the read that asked), then read every sensor and encoder.
+  // Readings within one physics tick are the same physics state, so a native firmware can answer its other reads from
+  // this copy, adding their CPU cost itself (lab/firmware/shim, LFSIM_FAST_IO).
+  protected snapshot(flush_s: number, first_s: number) {
+    this.runPhysics(Math.max(0, flush_s));
+    this.runPhysics(Math.max(0, first_s));
+    const sensors = this.wiring.sensorPins.map((_, i) => this.scaleRead(this.sensorRaw(i)));
+    const c = this.counts();
+    const pcnt = [...this.pcntOffset.keys()].sort((a, b) => a - b).map((u) => {
+      const raw = (u === 0 ? c.L : c.R) - (this.pcntOffset.get(u) ?? 0);
+      return { unit: u, count: ((raw + 32768) % 65536 + 65536) % 65536 - 32768 };
+    });
+    return { tickLeft_s: TICK - this.pending, now_us: Math.floor((this.sim.time + this.pending) * 1e6), sensors, pcnt,
+      costAdc_s: this.avr ? COST.analogReadAvr : COST.analogRead, costCall_s: COST.call };
+  }
+  protected spend(seconds: number) { this.runPhysics(Math.max(0, seconds)); }
 
   // ---------------- operator: buttons and the calibration sweep ----------------
   private operatorStep() {

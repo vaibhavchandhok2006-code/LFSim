@@ -25,6 +25,7 @@
 #include "esp_adc/adc_oneshot.h"
 #include "rom/ets_sys.h"
 #include "nvs.h"
+#include "driver/pulse_cnt.h"
 #include "nvs_flash.h"
 
 #undef printf
@@ -59,7 +60,13 @@ static void send_line(const char *name, const char *args_json, int reply, int ou
   fprintf(stdout, "{\"f\":\"%s\",\"a\":[%s],\"r\":%d,\"o\":%d}\n", name, args_json ? args_json : "", reply, out);
 }
 
+#ifdef LFSIM_FAST_IO
+static void fast_drop(void);
+#endif
 double lfsim_call(const char *name, const char *args_json, int reply, double *out) {
+#ifdef LFSIM_FAST_IO
+  if (name[0] != '_' || name[1] != '_') fast_drop();
+#endif
   send_line(name, args_json, reply || out != NULL, out != NULL);
   if (!reply && !out) return 0;
   fflush(stdout);
@@ -136,10 +143,82 @@ void lfsim_fail(const char *fmt, ...) {
 #define A(...) (snprintf(args_, sizeof args_, __VA_ARGS__), args_)
 static char args_[512];
 
+/* ---------------------------------------------------------------- fast I/O (LFSIM_FAST_IO)
+ * Reads inside one physics tick see the same physics state. The first read asks the simulator for a snapshot of all
+ * sensors, encoders and the clock (and how long until the next tick); later reads in the same tick are answered here,
+ * adding their CPU cost to a local count that is handed back before the next call. Any other call ends the snapshot. */
+#ifdef LFSIM_FAST_IO
+static int fast_valid;
+static double fast_left, fast_spent, fast_cost_adc, fast_cost_call;
+static long long fast_now;
+static int fast_nadc, fast_adc_h[32], fast_adc_ch[32], fast_adc_v[32];
+static int fast_npc, fast_pc_u[8], fast_pc_c[8];
+static char fast_line[1024];
+static void fast_drop(void) {
+  if (fast_spent > 0) { char a[48]; snprintf(a, sizeof a, "%.4f", fast_spent); fast_spent = 0; send_line("__cost", a, 0, 0); }
+  fast_valid = 0;
+}
+static void fast_request(const char *name, const char *a) {
+  send_line(name, a, 1, 0);
+  fflush(stdout);
+  for (;;) {
+    if (!fgets(fast_line, sizeof fast_line, stdin)) exit(0);
+    if (fast_line[0] == 'I') { int k = atoi(fast_line + 2); if (k >= 0 && k < isr_count) isr_pending[k] += 1; continue; }
+    if (fast_line[0] == 'X') exit(0);
+    if (fast_line[0] == 'S') break;
+  }
+  char *p = fast_line + 2;
+  fast_left = strtod(p, &p); fast_now = strtoll(p, &p, 10); fast_cost_adc = strtod(p, &p); fast_cost_call = strtod(p, &p);
+  fast_nadc = (int)strtol(p, &p, 10);
+  for (int i = 0; i < fast_nadc && i < 32; i++) { fast_adc_h[i] = (int)strtol(p, &p, 10); fast_adc_ch[i] = (int)strtol(p, &p, 10); fast_adc_v[i] = (int)strtol(p, &p, 10); }
+  fast_npc = (int)strtol(p, &p, 10);
+  for (int i = 0; i < fast_npc && i < 8; i++) { fast_pc_u[i] = (int)strtol(p, &p, 10); fast_pc_c[i] = (int)strtol(p, &p, 10); }
+  fast_valid = 1;
+  run_pending_isrs();
+}
+static void fast_snap(const char *first) {
+  char a[64];
+  snprintf(a, sizeof a, "%.4f,\"%s\"", fast_spent, first);
+  fast_spent = 0;
+  fast_request("__snap", a);
+}
+/* Returns 1 and the value if this read can be answered from the snapshot (spending `cost` µs). */
+static int fast_take(double cost, const char *first) {
+  if (fast_valid && fast_spent + cost < fast_left - 1e-6) { fast_spent += cost; return 1; }
+  if (fast_valid) fast_drop();
+  fast_snap(first);
+  return 1;
+}
+static int fast_adc(int h, int ch, int *v) {
+  fast_take(fast_valid ? fast_cost_adc : 0, "adc");
+  for (int i = 0; i < fast_nadc; i++) if (fast_adc_h[i] == h && fast_adc_ch[i] == ch) { *v = fast_adc_v[i]; return 1; }
+  return 0;
+}
+static int fast_pcnt(int u, int *v) {
+  fast_take(fast_valid ? fast_cost_call : 0, "pcnt");
+  for (int i = 0; i < fast_npc; i++) if (fast_pc_u[i] == u) { *v = fast_pc_c[i]; return 1; }
+  return 0;
+}
+static long long fast_time(void) {
+  if (!fast_valid) fast_snap("time");
+  return fast_now + (long long)fast_spent;
+}
+#endif
+
 /* ---------------------------------------------------------------- time and tasks */
 
-int64_t esp_timer_get_time(void) { return (int64_t)lfsim_call("esp_timer_get_time", "", 1, NULL); }
-void vTaskDelay(TickType_t ticks) { lfsim_call("vTaskDelay", A("%.6f", (double)ticks * 1000.0 / configTICK_RATE_HZ), 1, NULL); }
+int64_t esp_timer_get_time(void) {
+#ifdef LFSIM_FAST_IO
+  return (int64_t)fast_time();
+#endif
+  return (int64_t)lfsim_call("esp_timer_get_time", "", 1, NULL);
+}
+void vTaskDelay(TickType_t ticks) {
+#ifdef LFSIM_FAST_IO
+  { char a[64]; snprintf(a, sizeof a, "%.4f,%.6f", fast_spent, (double)ticks * 1000.0 / configTICK_RATE_HZ); fast_spent = 0; fast_valid = 0; fast_request("__delay", a); return; }
+#endif
+  lfsim_call("vTaskDelay", A("%.6f", (double)ticks * 1000.0 / configTICK_RATE_HZ), 1, NULL);
+}
 TickType_t xTaskGetTickCount(void) { return (TickType_t)(((uint64_t)lfsim_call("millis", "", 1, NULL) * configTICK_RATE_HZ) / 1000); }
 void taskYIELD(void) { lfsim_call("taskYIELD", "", 1, NULL); }
 void ets_delay_us(uint32_t us) { lfsim_call("ets_delay_us", A("%u", us), 1, NULL); }
@@ -217,6 +296,9 @@ esp_err_t adc_oneshot_config_channel(adc_oneshot_unit_handle_t h, adc_channel_t 
   return (esp_err_t)lfsim_call("adc_oneshot_config_channel", A("{\"h\":%d},%d,{\"atten\":%d,\"bitwidth\":%d}", (int)(intptr_t)h, (int)ch, (int)c->atten, (int)c->bitwidth), 1, NULL);
 }
 esp_err_t adc_oneshot_read(adc_oneshot_unit_handle_t h, adc_channel_t ch, int *out_raw) {
+#ifdef LFSIM_FAST_IO
+  { int v; if (fast_adc((int)(intptr_t)h, (int)ch, &v)) { *out_raw = v; return ESP_OK; } }
+#endif
   double v = 0;
   esp_err_t r = (esp_err_t)lfsim_call("adc_oneshot_read", A("{\"h\":%d},%d", (int)(intptr_t)h, (int)ch), 1, &v);
   *out_raw = (int)v;
@@ -224,8 +306,40 @@ esp_err_t adc_oneshot_read(adc_oneshot_unit_handle_t h, adc_channel_t ch, int *o
 }
 esp_err_t adc_oneshot_del_unit(adc_oneshot_unit_handle_t h) { (void)h; return ESP_OK; }
 
+/* ---------------------------------------------------------------- PCNT (wheel encoders; unit handles are 1 + unit number) */
+#define PCNT_H(u) ((int)(intptr_t)(u) - 1)
+esp_err_t pcnt_new_unit(const pcnt_unit_config_t *c, pcnt_unit_handle_t *out) {
+  (void)c; double id = 0;
+  esp_err_t r = (esp_err_t)lfsim_call("pcnt_new_unit", "{}", 1, &id);
+  *out = (pcnt_unit_handle_t)(intptr_t)((int)id + 1);
+  return r;
+}
+esp_err_t pcnt_del_unit(pcnt_unit_handle_t u) { (void)u; return ESP_OK; }
+esp_err_t pcnt_unit_set_glitch_filter(pcnt_unit_handle_t u, const pcnt_glitch_filter_config_t *c) { (void)u; (void)c; return ESP_OK; }
+esp_err_t pcnt_new_channel(pcnt_unit_handle_t u, const pcnt_chan_config_t *c, pcnt_channel_handle_t *out) {
+  lfsim_call("pcnt_new_channel", A("%d,{\"edge_gpio_num\":%d,\"level_gpio_num\":%d}", PCNT_H(u), c->edge_gpio_num, c->level_gpio_num), 0, NULL);
+  *out = (pcnt_channel_handle_t)(intptr_t)1;
+  return ESP_OK;
+}
+esp_err_t pcnt_channel_set_edge_action(pcnt_channel_handle_t c, pcnt_channel_edge_action_t a, pcnt_channel_edge_action_t b) { (void)c; (void)a; (void)b; return ESP_OK; }
+esp_err_t pcnt_channel_set_level_action(pcnt_channel_handle_t c, pcnt_channel_level_action_t a, pcnt_channel_level_action_t b) { (void)c; (void)a; (void)b; return ESP_OK; }
+esp_err_t pcnt_unit_enable(pcnt_unit_handle_t u) { (void)u; return ESP_OK; }
+esp_err_t pcnt_unit_disable(pcnt_unit_handle_t u) { (void)u; return ESP_OK; }
+esp_err_t pcnt_unit_start(pcnt_unit_handle_t u) { (void)u; return ESP_OK; }
+esp_err_t pcnt_unit_stop(pcnt_unit_handle_t u) { (void)u; return ESP_OK; }
+esp_err_t pcnt_unit_clear_count(pcnt_unit_handle_t u) { lfsim_call("pcnt_unit_clear_count", A("%d", PCNT_H(u)), 0, NULL); return ESP_OK; }
+esp_err_t pcnt_unit_get_count(pcnt_unit_handle_t u, int *value) {
+#ifdef LFSIM_FAST_IO
+  { int v; if (fast_pcnt(PCNT_H(u), &v)) { *value = v; return ESP_OK; } }
+#endif
+  double v = 0;
+  esp_err_t r = (esp_err_t)lfsim_call("pcnt_unit_get_count", A("%d", PCNT_H(u)), 1, &v);
+  *value = (int)v;
+  return r;
+}
+
 /* ---------------------------------------------------------------- NVS (flash; kept between the runs of a session) */
-#define NVS_MAX_VALUE 4000
+#define NVS_MAX_VALUE 16000
 #define NVS_MAX_OPEN 16
 static struct { char ns[16]; int write; int used; } nvs_open_tab[NVS_MAX_OPEN];
 static char text_line[2 * NVS_MAX_VALUE + 64];

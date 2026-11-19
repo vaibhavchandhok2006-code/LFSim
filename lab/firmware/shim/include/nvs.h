@@ -1,6 +1,6 @@
 /* LFSim shim: ESP-IDF nvs.h (key-value storage in flash). Values persist between the runs of a simulated session,
  * as flash does between power cycles. Limits as on the chip: names up to 15 characters; strings and blobs here up to
- * 4000 bytes (simulator limit). */
+ * 16000 bytes (simulator limit). */
 #ifndef NVS_H
 #define NVS_H
 #include <stddef.h>

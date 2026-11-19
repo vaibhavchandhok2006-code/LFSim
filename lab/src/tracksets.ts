@@ -16,7 +16,7 @@ import { generateTrack, generateTemplateTrack, checkTrack, type TrackCheck } fro
 import { NOVEL_BUDGET } from '../../src/track/generate';
 import { trackStats, type TrackStats } from './stats';
 
-export const GENERATOR_VERSION = 5; // 5: mixed sets (variations + route mazes) and a novel-style group; 4: variations only; 3: route mazes; 2: 4 m lattice
+export const GENERATOR_VERSION = 6; // 6: start and finish squares joined to the maze (5 left them cut off on 4 m mats); 5: mixed sets (variations + route mazes) and a novel-style group; 4: variations only; 3: route mazes; 2: 4 m lattice
 export const HELD_OUT_SEED_BASE = 1_000_000;
 export const NOVEL_SEED_BASE = 2_000_000;
 // The real Shaastra maze that track sets vary by default (empty list = generated route-style mazes).

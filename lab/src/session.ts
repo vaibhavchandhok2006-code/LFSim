@@ -21,6 +21,9 @@ export interface SessionPlan {
   explore: SwitchSetting;        // used until the robot holds a complete route in memory
   memory: SwitchSetting[];       // memory-run settings, safest first; the operator moves up after a success
   dry_s?: number;                // 2027: length of the unscored dry run at the start (0 or absent = all actual)
+  // The team's own rule for stopping a run that is still making progress (seconds; absent = the competition file's
+  // operator estimate). A mapping robot is best left running: stuck runs are still stopped.
+  giveUp_s?: number;
 }
 
 // A checkpoint on the track (positions and values are told to teams at the start of the match).
@@ -71,6 +74,7 @@ export interface SessionOptions {
   checkpoints?: Checkpoint[];
   // Native C firmware (Phase 2): each run starts a fresh firmware process (a reset), flash carries over.
   firmware?: { exe: string; wiring: Wiring; operator: { first?: OperatorScript; each: OperatorScript } };
+  onConsole?: (run: number, t: number, text: string) => void; // the firmware's serial output, per run
 }
 
 const CHUNK = 0.05;
@@ -137,12 +141,14 @@ export async function runSession(o: SessionOptions): Promise<SessionResult> {
     let seenEv = 0;
     let lastProgT = 0, lastDist = 0;
     let reached = 0;
-    const limit = Math.min(budget, op.giveUpAfter_s);
+    const giveUp = o.plan.giveUp_s ?? op.giveUpAfter_s;
+    const limit = Math.min(budget, giveUp);
     try {
     const covered = () => { for (const cp of cps) if (cp.C > reached && Math.hypot(s.body.x - cp.x, s.body.y - cp.y) < CHECKPOINT_RADIUS_M) reached = cp.C; };
     while (end === null) {
       await e.advance(Math.min(limit, s.time + CHUNK));
-      e.drain();
+      const dr = e.drain() as { console?: { t: number; text: string }[] };
+      if (o.onConsole) for (const l of dr.console ?? []) o.onConsole(index, l.t, l.text);
       covered();
       for (; seenEv < s.events.length; seenEv += 1) {
         const ev = s.events[seenEv];
@@ -160,9 +166,9 @@ export async function runSession(o: SessionOptions): Promise<SessionResult> {
         end = 'stuck'; endT = s.time; note = `No progress for ${op.stuckWindow_s} s`; break;
       }
       if (s.time >= limit - 1e-9) {
-        end = limit < op.giveUpAfter_s ? (period === 'dry' ? 'dry-over' : 'session-over') : 'gave-up';
+        end = limit < giveUp ? (period === 'dry' ? 'dry-over' : 'session-over') : 'gave-up';
         endT = s.time;
-        note = end === 'gave-up' ? `Operator gave up after ${op.giveUpAfter_s} s` : end === 'dry-over' ? 'Dry run time ended' : 'Session time ran out';
+        note = end === 'gave-up' ? `Operator gave up after ${giveUp} s` : end === 'dry-over' ? 'Dry run time ended' : 'Session time ran out';
         break;
       }
     }

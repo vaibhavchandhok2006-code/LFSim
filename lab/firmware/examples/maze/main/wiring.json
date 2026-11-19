@@ -1,0 +1,78 @@
+{
+  "sensorPins": [
+    26,
+    25,
+    33,
+    32,
+    35,
+    34,
+    39,
+    36
+  ],
+  "adcChannels": [
+    {
+      "unit": 1,
+      "channel": 0,
+      "gpio": 36
+    },
+    {
+      "unit": 1,
+      "channel": 3,
+      "gpio": 39
+    },
+    {
+      "unit": 1,
+      "channel": 6,
+      "gpio": 34
+    },
+    {
+      "unit": 1,
+      "channel": 7,
+      "gpio": 35
+    },
+    {
+      "unit": 1,
+      "channel": 4,
+      "gpio": 32
+    },
+    {
+      "unit": 1,
+      "channel": 5,
+      "gpio": 33
+    },
+    {
+      "unit": 2,
+      "channel": 8,
+      "gpio": 25
+    },
+    {
+      "unit": 2,
+      "channel": 9,
+      "gpio": 26
+    }
+  ],
+  "driver": {
+    "leftPwm": 16,
+    "leftIn1": 17,
+    "leftIn2": 18,
+    "rightPwm": 19,
+    "rightIn1": 13,
+    "rightIn2": 22,
+    "standby": 23,
+    "leftInvert": false,
+    "rightInvert": false
+  },
+  "encoders": {
+    "leftA": 27,
+    "leftB": 14,
+    "rightA": 5,
+    "rightB": 15
+  },
+  "board": "esp32",
+  "buttons": [
+    {
+      "gpio": 4,
+      "activeLow": true
+    }
+  ]
+}

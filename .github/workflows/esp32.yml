@@ -13,7 +13,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        project: [rmi-test-rig, reference]
+        project: [rmi-test-rig, reference, maze]
     steps:
       - uses: actions/checkout@v4
       - name: Build lab/firmware/examples/${{ matrix.project }} for ESP32 (ESP-IDF v5.2)

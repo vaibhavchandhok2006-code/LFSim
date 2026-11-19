@@ -62,6 +62,18 @@ export function checkTrack(track: Track, g: JunctionGraph, c: Competition): Trac
     const inCorner = (cx < cell || cx > size - cell) && (cy < cell || cy > size - cell);
     if (!inCorner) problems.push('start square is not in a corner cell');
   }
+  // A line must actually touch each square (dark pixels within 2 cm outside its edge), not just come near it.
+  const touches = (r: NonNullable<Track['start']>) => {
+    const pad = Math.round(0.02 / track.res);
+    for (let y = r.y0 - pad; y <= r.y1 + pad; y += 1) for (let x = r.x0 - pad; x <= r.x1 + pad; x += 1) {
+      if (x >= r.x0 - 2 && x <= r.x1 + 2 && y >= r.y0 - 2 && y <= r.y1 + 2) continue;
+      if (x < 0 || y < 0 || x >= track.w || y >= track.h) continue;
+      if (track.dark[y * track.w + x] > 0.5) return true;
+    }
+    return false;
+  };
+  if (track.start && !touches(track.start)) problems.push('no line touches the start square');
+  if (track.finish && !touches(track.finish)) problems.push('no line touches the finish square');
   if (g.start === null) problems.push('no line leaves the start square');
   if (g.finish === null) problems.push('no line reaches the finish square');
   const adj = adjacency(g);

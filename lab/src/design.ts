@@ -58,6 +58,7 @@ export function loadDesign(file: string): Design {
   const problems = profileProblems({ ...DEFAULT_PROFILE, ...d.robot });
   if (problems.length) throw new Error(`${file}: robot values out of range: ${problems.slice(0, 3).join(' ')}`);
   if (!d.plan?.explore || !Array.isArray(d.plan.memory) || d.plan.memory.length === 0 || d.plan.memory.length > 8) throw new Error(`${file}: the plan needs an explore setting and 1–8 memory settings.`);
+  if (d.plan.giveUp_s !== undefined && !(typeof d.plan.giveUp_s === 'number' && d.plan.giveUp_s >= 5 && d.plan.giveUp_s <= 600)) throw new Error(`${file}: plan.giveUp_s must be 5–600 seconds.`);
   if (d.plan.dry_s !== undefined && !(typeof d.plan.dry_s === 'number' && d.plan.dry_s >= 0 && d.plan.dry_s <= 600)) throw new Error(`${file}: plan.dry_s must be 0–600 seconds.`);
   let firmware: DesignFirmware | undefined;
   if (d.firmware !== undefined) firmware = parseDesignFirmware(d.firmware as unknown, path.dirname(path.resolve(file)), file);

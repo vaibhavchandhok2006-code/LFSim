@@ -1,0 +1,680 @@
+/* LFSim maze firmware (ESP-IDF, RMI test rig + wheel encoders).
+ *
+ * The robot knows nothing about the maze in advance. It follows the line, notices junctions from its sensor pattern,
+ * places them on its own map using wheel-encoder odometry, and chooses where to go with a general strategy (try an
+ * untried branch; otherwise go to the nearest junction that still has one). The map is saved to flash at every
+ * junction, so a run that is stopped (or a later run) carries on from what the robot already knows. Once the finish
+ * has been found, memory runs drive the shortest known route.
+ *
+ * Every tunable is in config.h and can be set at build time; LFSim Lab's search compares thousands of combinations.
+ *
+ * Operator: first boot — press (calibrate), sweep the bar across the line, press (save), press (go). Later boots:
+ * press (go). Speed switches: GPIO 21 / GPIO 2 select memory-run speed level 0..3. */
+#include <math.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include "config.h"
+#include "hw.h"
+#include "maze_map.h"
+#include "nvs.h"
+#include "nvs_flash.h"
+
+#define PI 3.14159265358979
+static const double MM_PER_COUNT = PI * WHEEL_D_MM / ENC_CPR;
+
+/* ------------------------------------------------------------------ calibration */
+static struct { uint16_t magic; int16_t lo[NS], hi[NS]; } cal;
+
+static bool cal_load(void) {
+  nvs_handle_t h;
+  if (nvs_open("maze", NVS_READONLY, &h) != ESP_OK) return false;
+  size_t n = sizeof cal;
+  esp_err_t e = nvs_get_blob(h, "cal", &cal, &n);
+  nvs_close(h);
+  return e == ESP_OK && n == sizeof cal && cal.magic == 0xCA1;
+}
+static void cal_save(void) {
+  nvs_handle_t h;
+  if (nvs_open("maze", NVS_READWRITE, &h) != ESP_OK) return;
+  nvs_set_blob(h, "cal", &cal, sizeof cal);
+  nvs_commit(h);
+  nvs_close(h);
+}
+static void wait_press(void) {
+  while (!hw_button()) hw_wait_ms(5);
+  hw_wait_ms(30);
+  while (hw_button()) hw_wait_ms(5);
+}
+static void calibrate(void) {
+  for (int i = 0; i < NS; i++) { cal.lo[i] = 4095; cal.hi[i] = 0; }
+  int raw[NS];
+  while (!hw_button()) {
+    hw_read_raw(raw);
+    for (int i = 0; i < NS; i++) { if (raw[i] < cal.lo[i]) cal.lo[i] = (int16_t)raw[i]; if (raw[i] > cal.hi[i]) cal.hi[i] = (int16_t)raw[i]; }
+    hw_wait_ms(2);
+  }
+  while (hw_button()) hw_wait_ms(5);
+  cal.magic = 0xCA1;
+  for (int i = 0; i < NS; i++) if (cal.hi[i] - cal.lo[i] < 200) { cal.lo[i] = 300; cal.hi[i] = 2600; } /* sweep missed it: defaults */
+  cal_save();
+  printf("calibrated\n");
+}
+
+/* ------------------------------------------------------------------ state of the robot */
+static double X, Y, TH;          /* pose: mm, mm, rad (map frame) */
+static double ODO;               /* distance driven along the path, mm */
+static int32_t encL0, encR0;
+static int c[NS];                /* calibrated readings 0..1000 */
+static bool b[NS];               /* black? */
+static int nb;                   /* black count */
+static double line_mm;           /* line position, + = left of centre */
+static bool line_ok;
+static double base_duty;
+static double last_err;
+static int64_t last_us;
+static uint32_t rng = SEED * 2654435761u + 1;
+static double t_spin, t_creep, t_scan, t_follow, t_dead; /* time budget, s (diagnostics) */
+static int n_turns, n_straight;
+
+static int th10(void) { return norm10((int)lround(TH * 1800.0 / PI)); }
+static void bar(double *sx, double *sy) { *sx = X + ARM_MM * cos(TH); *sy = Y + ARM_MM * sin(TH); }
+static bool centre(void) { return b[3] || b[4]; }
+
+static void sense(void) {
+  int raw[NS];
+  hw_read_raw(raw);
+  int sum = 0; double w = 0;
+  nb = 0;
+  for (int i = 0; i < NS; i++) {
+    int span = cal.hi[i] - cal.lo[i];
+    int v = span > 0 ? (raw[i] - cal.lo[i]) * 1000 / span : 0;
+    c[i] = v < 0 ? 0 : (v > 1000 ? 1000 : v);
+    b[i] = c[i] > BLACK_ON;
+    if (b[i]) nb++;
+    sum += c[i];
+    w += c[i] * (3.5 - i) * SPACING_MM;
+  }
+  line_ok = sum > 300;
+  line_mm = line_ok ? w / sum : 0;
+}
+
+static void odometry(void) {
+  int32_t l, r;
+  hw_encoders(&l, &r);
+  double dl = (l - encL0) * MM_PER_COUNT, dr = (r - encR0) * MM_PER_COUNT;
+  encL0 = l; encR0 = r;
+  double ds = (dl + dr) / 2, dth = (dr - dl) / TRACK_MM;
+  X += ds * cos(TH + dth / 2);
+  Y += ds * sin(TH + dth / 2);
+  TH += dth;
+  ODO += fabs(ds);
+}
+
+static double dt_s(void) {
+  int64_t now = hw_us();
+  double dt = (now - last_us) / 1e6;
+  last_us = now;
+  return dt > 0 && dt < 0.1 ? dt : LOOP_MS / 1000.0;
+}
+
+static void ramp(double target, double dt) {
+  double step = ACCEL * dt;
+  if (base_duty < target - step) base_duty += step;
+  else if (base_duty > target + step) base_duty -= step;
+  else base_duty = target;
+}
+
+/* Follow the line with PD; with no usable line, hold the heading th_ref. */
+static void steer(double speed, double dt, bool use_line, double th_ref) {
+  ramp(speed, dt);
+  double corr;
+  if (use_line && line_ok) {
+    double err = line_mm;
+    double d = (err - last_err) / dt;
+    last_err = err;
+    corr = KP * err + KD * d;
+  } else {
+    double e = remainder(th_ref - TH, 2 * PI);
+    corr = 1.5 * e;  /* duty per rad */
+    last_err = line_ok ? line_mm : 0;
+  }
+  double l = base_duty - corr, r = base_duty + corr;
+  if (l > 1) l = 1;
+  if (r > 1) r = 1;
+  hw_motors(l, r);
+}
+
+/* Heading snap: most lines run along the mat's axes (right angles survive any stretching of the layout; diagonals do
+ * not stay at 45°). After a long straight close to an axis, pull the heading onto it. */
+static double snap_odo = 0, snap_th = 0;
+static void snap_heading(void) {
+#if SNAP
+  if (!line_ok || nb > 3 || fabs(line_mm) > 6) { snap_odo = ODO; snap_th = TH; return; }
+  if (fabs(remainder(TH - snap_th, 2 * PI)) > 3 * PI / 180) { snap_odo = ODO; snap_th = TH; return; }
+  if (ODO - snap_odo < 150) return;
+  double step = PI / 2, k = round(TH / step), target = k * step;
+  if (fabs(TH - target) < SNAP_DEG * PI / 180) TH += 0.02 * (target - TH);
+#endif
+}
+
+/* ------------------------------------------------------------------ crossings seen by the sensor bar */
+typedef struct { double jx, jy, odo_end; int left, right, straight; } crossing_t;
+#define QN 4
+static crossing_t q[QN];
+static int qn;
+static int det;                  /* 0 idle, 1 in a crossing, 2 looking ahead */
+static double in_odo, in_sx, in_sy, white_odo, black_odo;
+static int in_l, in_r;
+static bool all_black_run;
+
+enum { EV_NONE, EV_FINISH, EV_LINE_END, EV_START };
+
+static void det_reset(void) { det = 0; qn = 0; white_odo = ODO; black_odo = ODO; all_black_run = false; }
+
+/* Called every loop while driving forward. Queues crossings; returns EV_FINISH or EV_LINE_END. */
+static int detect(void) {
+  bool wide = nb >= WIDE_N || ((b[0] || b[NS - 1]) && centre() && nb >= 3);
+  if (nb == 0) { if (white_odo < 0) white_odo = ODO; } else white_odo = -1;
+  if (nb == NS) { if (!all_black_run) { all_black_run = true; black_odo = ODO; } } else all_black_run = false;
+  if (all_black_run && hypot(X, Y) < START_SEE_MM && ODO - black_odo >= 25) return EV_START; /* the start square: the axle is still outside */
+  if (all_black_run && ODO - black_odo >= FINISH_MM) return EV_FINISH;
+  double sx, sy;
+  bar(&sx, &sy);
+  switch (det) {
+    case 0:
+      if (wide) { det = 1; in_odo = ODO; in_sx = sx; in_sy = sy; in_l = in_r = 0; }
+      else if (white_odo >= 0 && ODO - white_odo >= DEADEND_MM) return EV_LINE_END;
+      break;
+    case 1:
+      if (b[0] || b[1]) in_l = 1;
+      if (b[NS - 1] || b[NS - 2]) in_r = 1;
+      if (!wide || ODO - in_odo > 140) {
+        if (qn < QN) {
+          crossing_t *k = &q[qn++];
+          k->jx = (in_sx + sx) / 2; k->jy = (in_sy + sy) / 2; k->odo_end = ODO;
+          k->left = in_l; k->right = in_r; k->straight = -1;
+        }
+        det = 2;
+      }
+      break;
+    case 2:
+      if (wide) { if (qn) q[qn - 1].straight = 1; det = 1; in_odo = ODO; in_sx = sx; in_sy = sy; in_l = in_r = 0; break; }
+      if (qn && ODO - q[qn - 1].odo_end >= AHEAD_MM) { q[qn - 1].straight = centre() || b[2] || b[5]; det = 0; }
+      break;
+  }
+  return EV_NONE;
+}
+
+/* ------------------------------------------------------------------ turning on the spot */
+/* Spin (dir +1 = left, CCW) until the branch towards target10 is under the centre sensors: the `skip`-th line after
+ * leaving the current one if it lies within COUNT_DEG of the target, or any line within CAPTURE_DEG of the target.
+ * Returns the heading (tenths of a degree) where it was found, or -1 if no line was found in a full turn. */
+static int spin_to_(int target10, int dir, int skip);
+static int spin_to(int target10, int dir, int skip) { int64_t t0 = hw_us(); int r = spin_to_(target10, dir, skip); t_spin += (hw_us() - t0) / 1e6; n_turns++; return r; }
+static int spin_to_(int target10, int dir, int skip) {
+  double start = TH;
+  bool was = centre(), left_first = !was;
+  int seen = 0;
+  base_duty = 0;
+  for (;;) {
+    odometry(); sense(); dt_s();
+    hw_motors(-dir * SPEED_TURN, dir * SPEED_TURN);
+    double turned = fabs(TH - start);
+    bool now = centre();
+    if (!now) left_first = true;
+    if (now && !was && left_first && turned > 25 * PI / 180) {
+      int h = th10(), d = abs(angle_diff10(h, target10));
+      if ((seen == skip && d <= COUNT_DEG * 10) || d <= CAPTURE_DEG * 10) {
+        /* the bar has reached the edge of the line: keep turning until the line is under the middle of the bar */
+        double t0 = TH;
+        while (fabs(TH - t0) < 30 * PI / 180) {
+          odometry(); sense(); dt_s();
+          if (line_ok && nb <= 4 && dir * line_mm <= 0) break;
+          hw_motors(-dir * SPEED_TURN, dir * SPEED_TURN);
+          hw_wait_ms(LOOP_MS);
+        }
+        hw_motors(0, 0);
+        return th10();
+      }
+      seen++;
+    }
+    was = now;
+    if (turned > 2 * PI + 0.5) { hw_motors(0, 0); return -1; }
+    hw_wait_ms(LOOP_MS);
+  }
+}
+
+/* A full turn on the spot, recording the heading of every line under the centre sensors. */
+static int scan_(int out10[MAX_EXITS]);
+static int scan(int out10[MAX_EXITS]) { int64_t t0 = hw_us(); int r = scan_(out10); t_scan += (hw_us() - t0) / 1e6; return r; }
+static int scan_(int out10[MAX_EXITS]) {
+  double start = TH;
+  bool was = centre();
+  int n = 0; double seg_start = 0; bool in_seg = false;
+  base_duty = 0;
+  for (;;) {
+    odometry(); sense(); dt_s();
+    hw_motors(-SPEED_TURN, SPEED_TURN);
+    bool now = centre();
+    if (now && !was) { in_seg = true; seg_start = TH; }
+    if (!now && was && in_seg) {
+      int mid = norm10((int)lround((seg_start + TH) / 2 * 1800 / PI));
+      if (n < MAX_EXITS) out10[n++] = mid;
+      in_seg = false;
+    }
+    was = now;
+    if (TH - start > 2 * PI + 20 * PI / 180) break;
+    hw_wait_ms(LOOP_MS);
+  }
+  hw_motors(0, 0);
+  int m = 0; /* merge duplicates (the line under the bar at the start is seen again at the end) */
+  for (int i = 0; i < n; i++) {
+    bool dup = false;
+    for (int j = 0; j < m; j++) if (abs(angle_diff10(out10[i], out10[j])) < 200) dup = true;
+    if (!dup) out10[m++] = out10[i];
+  }
+  return m;
+}
+
+/* ------------------------------------------------------------------ the run */
+static int cur_node = 0, cur_exit = 0;     /* where we left from */
+static double depart_odo = 0;
+static bool on_dead = false;               /* travelling back from a dead end along cur_exit */
+static bool mode_route = false;            /* memory run: drive the shortest known route */
+static double speed_line;
+
+static int rel10(int dir10) { return angle_diff10(dir10, th10()); }
+
+/* The order in which untried branches are tried (higher = earlier). */
+static double preference(int node, int dir10) {
+  int r = rel10(dir10);
+  switch (ORDER) {
+    case 0: return r;                                   /* leftmost first */
+    case 1: return -r;                                  /* rightmost first */
+    case 2: return -abs(r) * 2 + (r > 0 ? 1 : 0);       /* straight, then left */
+    case 3: {                                           /* away from the start */
+      double a = dir10 * PI / 1800, nx = M.node[node].x, ny = M.node[node].y, d = hypot(nx, ny);
+      if (d < 1) return r;
+      return (cos(a) * nx + sin(a) * ny) / d * 1000 + r * 0.01;
+    }
+    default: rng = rng * 1103515245u + 12345u; return (double)((rng >> 8) & 0xffff);
+  }
+}
+
+/* Lines of this junction met before the target when turning in direction dir (excluding the one under the bar). */
+static int lines_before(int node, int target, int dir) {
+  int tt = norm10(dir * rel10(M.node[node].ex[target].dir)), count = 0;
+  for (int k = 0; k < M.node[node].n; k++) {
+    if (k == target) continue;
+    int r = norm10(dir * rel10(M.node[node].ex[k].dir));
+    if (r > 250 && r < tt) count++;
+  }
+  return count;
+}
+
+/* ORDER 5: value every untried branch on the map: how far from the start it leads (where the finish likely is) less
+ * the driving needed to reach it. Returns the exit to take now, or -1 if there is no untried branch. */
+static float g_cost[MAX_NODES];
+static int16_t g_first[MAX_NODES];
+static int choose_global(int n) {
+  map_costs(n, th10(), TURN_COST_MM, g_cost, g_first);
+  double best = -1e18; int bk = -1;
+  for (int i = 1; i < M.count; i++) {
+    if (!isfinite(g_cost[i])) continue;
+    node_t *p = &M.node[i];
+    for (int k = 0; k < p->n; k++) {
+      if (p->ex[k].state != EX_NEW) continue;
+      double a = p->ex[k].dir * PI / 1800, ex = p->x + 250 * cos(a), ey = p->y + 250 * sin(a);
+      double head = i == n ? 0 : 1;
+      double v = W_FAR * hypot(ex, ey) - g_cost[i] - (i == n ? TURN_COST_MM * (abs(rel10(p->ex[k].dir)) > 300) : 0) - head;
+      if (v > best) { best = v; bk = i == n ? k : g_first[i]; }
+    }
+  }
+  return bk;
+}
+
+static int choose(int n) {
+  node_t *p = &M.node[n];
+  if (mode_route) {
+    double cost; int goal;
+    int k = map_plan(n, th10(), false, TURN_COST_MM, &cost, &goal);
+    if (k >= 0) return k;
+  }
+#if ORDER == 5
+  { int k = choose_global(n); if (k >= 0) return k; }
+#endif
+#if ORDER == 8 || ORDER == 9
+  /* wall following that cannot loop: the first line on that side not yet driven out of this junction */
+  {
+    int best = -1; double bp = -1e18;
+    for (int k = 0; k < p->n; k++) {
+      exit_t *e = &p->ex[k];
+      if ((e->state == EX_EDGE && e->to == 0) || e->state == EX_DEAD || e->used) continue;
+      if (e->state == EX_EDGE && M.node[e->to].ex[e->to_exit].used && !map_has_new(e->to)) continue; /* driven both ways */
+      int r = rel10(e->dir);
+      double v = abs(r) > 1500 ? -1e9 : (ORDER == 8 ? r : -r);
+      if (v > bp) { bp = v; best = k; }
+    }
+    if (best >= 0) return best;
+    double cost; int goal;
+    int k = map_plan(n, th10(), true, TURN_COST_MM, &cost, &goal);
+    if (k >= 0) return k;
+  }
+#endif
+#if ORDER == 6 || ORDER == 7
+  /* pure wall following (6 left hand, 7 right hand): the first line on that side, explored or not; never into the
+   * start square or a known dead end; back only when nothing else */
+  {
+    int best = -1; double bp = -1e18;
+    for (int k = 0; k < p->n; k++) {
+      exit_t *e = &p->ex[k];
+      if ((e->state == EX_EDGE && e->to == 0) || e->state == EX_DEAD) continue;
+      int r = rel10(e->dir);
+      double v = abs(r) > 1500 ? -1e9 : (ORDER == 6 ? r : -r);
+      if (v > bp) { bp = v; best = k; }
+    }
+    if (best >= 0) return best;
+  }
+#endif
+  int best = -1; double bp = -1e18;
+  for (int k = 0; k < p->n; k++) {
+    if (p->ex[k].state != EX_NEW) continue;
+    double v = preference(n, p->ex[k].dir);
+    if (v > bp) { bp = v; best = k; }
+  }
+  if (best >= 0) return best;
+#if FRONTIER
+  {
+    double cost; int goal;
+    int k = map_plan(n, th10(), true, TURN_COST_MM, &cost, &goal);
+    if (k >= 0) return k;
+    k = map_plan(n, th10(), false, TURN_COST_MM, &cost, &goal);
+    if (k >= 0) return k;
+  }
+#endif
+  /* wall rule: leftmost line that does not lead into the start square; back only if nothing else */
+  best = -1; bp = -1e18;
+  for (int k = 0; k < p->n; k++) {
+    exit_t *e = &p->ex[k];
+    if ((e->state == EX_EDGE && e->to == 0) || e->state == EX_DEAD) continue;
+    int r = rel10(e->dir);
+    double v = abs(r) > 1500 ? -1e9 : r;
+    if (v > bp) { bp = v; best = k; }
+  }
+  return best;
+}
+
+/* Which known junction is this? On a line we know, the one at its other end. On a new line, a known junction only if
+ * it has an untried branch pointing back the way we came (closing a loop), or if it is very close. -1 = a new one. */
+static int locate(double jx, double jy, int h) {
+  int expect = -1;
+  if (cur_node >= 0 && cur_exit >= 0 && cur_exit < M.node[cur_node].n) {
+    exit_t *e = &M.node[cur_node].ex[cur_exit];
+    if (on_dead) expect = cur_node;
+    else if (e->state == EX_EDGE && e->to != 0) expect = e->to;
+  }
+  if (expect >= 0 && hypot(M.node[expect].x - jx, M.node[expect].y - jy) < EXPECT_MM) return expect;
+  int back = norm10(h + 1800), best = -1;
+  double bd = LOOP_MM;
+  for (int i = 1; i < M.count; i++) {
+    double d = hypot(M.node[i].x - jx, M.node[i].y - jy);
+    if (d >= bd) continue;
+    int a = map_exit_near(i, back, 450);
+    if (a >= 0 && M.node[i].ex[a].state == EX_NEW) { bd = d; best = i; }
+  }
+  if (best >= 0) return best;
+  return map_find(jx, jy, MATCH_MM);
+}
+
+/* A junction at (jx, jy), `ahead_mm` in front of the axle: update the map and choose the way on. Returns the node and
+ * sets *k to the exit to take (-1: no way on). The pose is corrected if the junction is already known. */
+static int junction_update(double jx, double jy, double ahead_mm, int left, int right, int straight, bool scanned, const int *dirs, int ndirs, int *k) {
+  int h = th10();
+  int n = locate(jx, jy, h);
+  bool fresh = n < 0;
+  if (fresh) { n = map_add_node(jx, jy); if (n < 0) { *k = -1; return -1; } }
+  else {
+    /* back at a known junction: correct the position, and the heading from the line we arrived by */
+    X += M.node[n].x - jx; Y += M.node[n].y - jy;
+    int a = map_exit_near(n, norm10(h + 1800), 450);
+    if (a >= 0) {
+      int want = norm10(M.node[n].ex[a].dir + 1800), d = angle_diff10(want, h);
+      if (abs(d) < HEAD_FIX_DEG * 10) { TH += d * PI / 1800; h = th10(); }
+    }
+  }
+  node_t *p = &M.node[n];
+  p->visits++;
+  int back = norm10(h + 1800);
+  int arr = map_exit_near(n, back, 450);
+  if (arr < 0) arr = map_add_exit(n, back);
+  if (scanned) {
+    for (int i = 0; i < ndirs; i++) if (abs(angle_diff10(dirs[i], back)) > 300 && map_exit_near(n, dirs[i], 300) < 0) map_add_exit(n, dirs[i]);
+  } else if (fresh || (KNOWN_ADD && p->n < 5)) {
+    int tol = fresh ? 450 : 600, cand[3], nc = 0;
+    if (left) cand[nc++] = norm10(h + 900);
+    if (straight) cand[nc++] = h;
+    if (right) cand[nc++] = norm10(h - 900);
+    for (int i = 0; i < nc; i++) if (map_exit_near(n, cand[i], tol) < 0) map_add_exit(n, cand[i]);
+  }
+  if (on_dead) on_dead = false;
+  else if (cur_node >= 0 && cur_exit >= 0 && arr >= 0) {
+    exit_t *from = &M.node[cur_node].ex[cur_exit];
+    if (from->state == EX_NEW || from->state == EX_EDGE) map_link(cur_node, cur_exit, n, arr, (int)(ODO + ahead_mm - depart_odo));
+  }
+  map_save();
+  *k = choose(n);
+  if (*k >= 0 && p->ex[*k].used < 255) p->ex[*k].used++;
+  printf("J t=%.2f n=%d %s at %d,%d h=%d exits=%d -> %d\n", hw_us() / 1e6, n, fresh ? "new" : "known", p->x, p->y, h / 10, p->n, *k);
+  return n;
+}
+
+/* A turn found no line: look all the way round and take the line nearest the wanted heading. */
+static void recover(int want10) {
+  int dirs[MAX_EXITS];
+  int m = scan(dirs), best = -1, bd = 99999;
+  for (int i = 0; i < m; i++) { int d = abs(angle_diff10(dirs[i], want10)); if (d < bd) { bd = d; best = i; } }
+  printf("recover: %d lines, nearest %d deg off\n", m, bd / 10);
+  if (best >= 0) { int r = angle_diff10(dirs[best], th10()); spin_to(dirs[best], r >= 0 ? 1 : -1, 0); }
+}
+
+/* Turn on the spot onto exit k of node n (the axle is over the junction). */
+static void turn_onto(int n, int k) {
+  node_t *p = &M.node[n];
+  int r = rel10(p->ex[k].dir);
+  if (abs(r) <= 300) return;
+  int dir = r > 0 ? 1 : -1;
+  if (abs(r) > 1500) dir = 1; /* turning back: always to the left */
+  int got = spin_to(p->ex[k].dir, dir, lines_before(n, k, dir));
+  if (got < 0) recover(p->ex[k].dir);
+  else if (p->ex[k].state == EX_NEW) p->ex[k].dir = (int16_t)got;
+}
+
+static void stop_forever(const char *why) {
+  hw_motors(0, 0);
+  printf("stop: %s\n", why);
+  for (;;) hw_wait_ms(100);
+}
+
+static void mark_dead_here(void) {
+  if (cur_node >= 0 && cur_exit >= 0 && !on_dead) {
+    exit_t *e = &M.node[cur_node].ex[cur_exit];
+    if (e->state == EX_NEW) { e->state = EX_DEAD; map_save(); }
+  }
+}
+
+void app_main(void) {
+  nvs_flash_init();
+  hw_init();
+  hw_motors(0, 0);
+  if (!cal_load()) { wait_press(); calibrate(); }
+  if (!map_load()) map_reset();
+  M.runs++;
+  mode_route = M.finish_node != 255;
+#if EXPLORE_MORE
+  if (mode_route && hw_switches() == 0) {
+    for (int i = 1; i < M.count && mode_route; i++) if (map_has_new(i)) mode_route = false;
+  }
+#endif
+  speed_line = mode_route ? SPEED_MEMORY0 + hw_switches() * SPEED_STEP : SPEED_EXPLORE;
+  printf("run %d: %s, %d junctions known, speed %.2f\n", M.runs, mode_route ? "route" : "explore", M.count - 1, speed_line);
+  map_save();
+  wait_press();
+
+  hw_encoders(&encL0, &encR0);
+  X = Y = TH = ODO = 0;
+  last_us = hw_us();
+  cur_node = 0; cur_exit = 0; depart_odo = 0;
+
+  /* leave the start square: straight on until a normal line is under the bar */
+  double ok_since = -1;
+  for (;;) {
+    odometry(); sense();
+    steer(SPEED_JUNCTION, dt_s(), false, 0);
+    if (nb >= 1 && nb <= 3) { if (ok_since < 0) ok_since = ODO; } else ok_since = -1;
+    if (ok_since >= 0 && ODO - ok_since > 20) break;
+    if (ODO > 600) stop_forever("no line out of the start square");
+    hw_wait_ms(LOOP_MS);
+  }
+  det_reset();
+
+  /* turn_pending: a junction ahead where we will turn; creep until the axle is over it */
+  bool turn_pending = false;
+  int pend_n = -1, pend_k = -1;
+  double pend_x = 0, pend_y = 0;
+  double th_hold = TH;
+  for (;;) {
+    odometry(); sense();
+    double dt = dt_s();
+    int ev = detect();
+    if (ev == EV_FINISH) {
+      if (cur_node >= 0 && cur_exit >= 0 && !on_dead) {
+        M.node[cur_node].ex[cur_exit].state = EX_FINISH;
+        M.finish_node = (uint8_t)cur_node; M.finish_exit = (uint8_t)cur_exit;
+        map_save();
+      }
+      double until = ODO + 60; /* roll fully into the square, then stop */
+      while (ODO < until) { odometry(); sense(); steer(SPEED_JUNCTION, dt_s(), false, TH); hw_wait_ms(LOOP_MS); }
+      stop_forever("finish");
+    }
+    if (ev == EV_START) {
+      printf("start square ahead: turning back\n");
+      hw_motors(0, 0);
+      mark_dead_here();
+      on_dead = true; turn_pending = false; qn = 0;
+      spin_to(norm10(th10() + 1800), 1, 0);
+      det_reset(); th_hold = TH; continue;
+    }
+    /* never drive back towards the start square on a line we do not know */
+    if (hypot(X, Y) < START_GUARD_MM && cur_node != 0 && ODO - depart_odo > 50 && !turn_pending) {
+      double to0 = atan2(-Y, -X);
+      if (fabs(remainder(to0 - TH, 2 * PI)) < 35 * PI / 180) {
+        printf("guard: start square ahead, turning back\n");
+        mark_dead_here();
+        on_dead = true;
+        spin_to(norm10(th10() + 1800), 1, 0);
+        det_reset(); th_hold = TH; continue;
+      }
+    }
+    if (turn_pending) {
+      t_creep += dt;
+      double ahead = (pend_x - X) * cos(TH) + (pend_y - Y) * sin(TH);
+      steer(SPEED_JUNCTION, dt, det == 0 && nb >= 1 && nb <= 3, th_hold);
+      if (ahead <= 0) {
+        turn_pending = false;
+        if (pend_n >= 0) { turn_onto(pend_n, pend_k); depart_odo = ODO; }
+        else if (spin_to(pend_k, angle_diff10(pend_k, th10()) > 0 ? 1 : -1, 0) < 0) recover(pend_k); /* a corner */
+        last_err = 0;
+        det_reset(); th_hold = TH;
+      }
+      hw_wait_ms(LOOP_MS);
+      continue;
+    }
+    if (ev == EV_LINE_END) {
+      double ex = X + ARM_MM * cos(TH), ey = Y + ARM_MM * sin(TH);
+#if DEAD_SCAN
+      /* drive the axle to where the line ended and look around: a sharp corner continues, a dead end does not */
+      double h0 = TH;
+      while ((ex - X) * cos(TH) + (ey - Y) * sin(TH) > 0) { odometry(); sense(); steer(SPEED_JUNCTION, dt_s(), false, h0); hw_wait_ms(LOOP_MS); }
+      hw_motors(0, 0);
+      int dirs[MAX_EXITS];
+      int m = scan(dirs);
+      int back = norm10(th10() + 1800), others = 0;
+      for (int i = 0; i < m; i++) if (abs(angle_diff10(dirs[i], back)) > 400) others++;
+      if (others > 0) {
+        int k, n = junction_update(X, Y, 0, 0, 0, 0, true, dirs, m, &k);
+        if (n < 0 || k < 0) stop_forever("no way on");
+        cur_node = n; cur_exit = k;
+        turn_onto(n, k);
+        depart_odo = ODO; last_err = 0;
+        det_reset(); th_hold = TH;
+        continue;
+      }
+#endif
+      mark_dead_here();
+      printf("dead end t=%.2f at %.0f,%.0f\n", hw_us() / 1e6, ex, ey);
+      on_dead = true;
+      { int want = norm10(th10() + 1800); if (spin_to(want, 1, 0) < 0) recover(want); }
+      det_reset(); th_hold = TH;
+      continue;
+    }
+    if (qn > 0 && q[0].straight >= 0) {
+      /* a junction ahead is fully seen: decide now, before reaching it */
+      crossing_t c0 = q[0];
+      for (int i = 1; i < qn; i++) q[i - 1] = q[i];
+      qn--;
+      double ahead = (c0.jx - X) * cos(TH) + (c0.jy - Y) * sin(TH);
+      int k, n;
+#if SCAN_MODE
+      if (map_find(c0.jx, c0.jy, MATCH_MM) < 0) {
+        /* a new junction: go to it and look around */
+        double h0 = TH;
+        while ((c0.jx - X) * cos(TH) + (c0.jy - Y) * sin(TH) > 0) { odometry(); sense(); steer(SPEED_JUNCTION, dt_s(), false, h0); hw_wait_ms(LOOP_MS); }
+        hw_motors(0, 0);
+        int dirs[MAX_EXITS];
+        int m = scan(dirs);
+        n = junction_update(c0.jx, c0.jy, 0, 0, 0, 0, true, dirs, m, &k);
+        if (n < 0 || k < 0) stop_forever("no way on");
+        cur_node = n; cur_exit = k;
+        turn_onto(n, k);
+        depart_odo = ODO; last_err = 0;
+        det_reset(); th_hold = TH;
+        hw_wait_ms(LOOP_MS);
+        continue;
+      }
+#endif
+#if !CORNER_NODES
+      if (c0.straight == 0 && (c0.left ^ c0.right)) {
+        /* a plain corner: one way on. Turn there without a map entry; the line continues to the next junction */
+        turn_pending = true; pend_n = -1; pend_k = norm10(th10() + (c0.left ? 900 : -900));
+        pend_x = X + ahead * cos(TH); pend_y = Y + ahead * sin(TH);
+        th_hold = TH; qn = 0;
+        printf("C t=%.2f corner %s\n", hw_us() / 1e6, c0.left ? "left" : "right");
+        steer(SPEED_JUNCTION, dt, false, th_hold);
+        hw_wait_ms(LOOP_MS);
+        continue;
+      }
+#endif
+      double cx = c0.jx, cy = c0.jy;
+      n = junction_update(cx, cy, ahead, c0.left, c0.right, c0.straight, false, NULL, 0, &k);
+      if (n < 0 || k < 0) stop_forever("no way on");
+      cur_node = n; cur_exit = k;
+      depart_odo = ODO + ahead;
+      if (abs(rel10(M.node[n].ex[k].dir)) > 300) {
+        /* turning: creep to the junction (its corrected position), then spin */
+        turn_pending = true; pend_n = n; pend_k = k;
+        pend_x = X + ahead * cos(TH); pend_y = Y + ahead * sin(TH);
+        th_hold = TH;
+        qn = 0; /* what the bar saw beyond this junction is on the line we leave */
+      }
+    }
+    t_follow += dt;
+    { static int64_t last_rep = 0; if (hw_us() - last_rep > 30000000) { last_rep = hw_us();
+      printf("T follow %.0f creep %.0f spin %.0f (%d) scan %.0f odo %.1f m\n", t_follow, t_creep, t_spin, n_turns, t_scan, ODO / 1000); } }
+    bool use_line = det == 0 && nb <= 4;
+    steer(det == 0 ? speed_line : SPEED_JUNCTION, dt, use_line, det == 0 ? TH : th_hold);
+    if (det == 0) th_hold = TH;
+    snap_heading();
+    hw_wait_ms(LOOP_MS);
+  }
+}
