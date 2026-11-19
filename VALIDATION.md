@@ -196,3 +196,5 @@ CSV / PNG / HTML report / GIF (2.0 MB) downloads, dark theme. No page or worker 
 | Arc turns (ARC_TURNS=1), 2 tracks | faster than stop-and-spin | worse (spin time 68 → 223 s): kept off, for the agent to fix |
 | What-if: 2× motor speed, own search (24 variants, up to 24 tracks) | more finishes | worse: best 10/24 = 42 % of single runs (finish 243 s mean vs 282 s); best gains at the edge of the range — control must be redesigned for speed |
 | Edge inference (INFER_MM 0 / 300 / 450), 12 tuning tracks | more finishes | 9 / 8 / fewer of 12 — no clear gain, kept off |
+| Wall-follower divergence (lab/tools/lh_divergence.ts), 12 tracks, left-hand runs | match the ideal route to the finish | first wrong junction after 3–34 matched junctions (of 44–57); classes found and fixed: short stubs, 5-way junctions, short dead ends, lines lost on curves |
+| Held-out sessions after the junction fixes (200 rpm robot, DEAD_SCAN=2) | ≥ 95 % | 10/24 = 42 %; finishes faster (145–165 s for the quickest); all failures out of time |

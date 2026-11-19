@@ -30,6 +30,17 @@ encoders, ESP32): `main.c` (behaviour), `swath.c` (junction pictures), `maze_map
 - A few tracks: list several ids, comma-separated. Use tracks `tune-0001` … `tune-0300` only (never `held-*`).
 - Each run of 590 s takes about 15 s. Do not run more than about 12 runs per round.
 
+## The best signal: wall-follower divergence
+A left-hand wall follower that handles every junction correctly reaches the finish on these mazes (about 30 m). So
+run the firmware as a pure left-hand follower and find the first junction where it goes wrong:
+```
+npx tsx lab/tools/try-maze.ts tune-0211,tune-0212,tune-0213 run "LFSIM_FAST_IO,ORDER=6" /tmp/lh
+npx tsx lab/tools/lh_divergence.ts tune-0211 /tmp/lh      # "matched the first N" and where it first went wrong
+```
+Then read the serial log around that time (`awk '$1>50 && $1<60' /tmp/lh/tune-0211.serial.txt`) and fix the cause
+in general. Classes fixed so far: short stubs, 5-way junctions (look-around), short dead ends (decide from the map),
+lines lost on curves (sweep). Per-junction reliability must reach about 99.9 % for 95 % finishes.
+
 ## How to work in a round
 1. Read `lab/agent/state.md` (scores so far and what earlier rounds tried) — do not repeat a failed idea.
 2. Look at failures of the current version: run 2–4 tracks it fails on, plot them, find the cause.

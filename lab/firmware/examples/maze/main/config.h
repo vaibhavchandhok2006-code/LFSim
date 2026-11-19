@@ -95,7 +95,7 @@
 #define COUNT_DEG 70.0           /* ...or the expected line by count, if it is within this of the target */
 #endif
 #ifndef DEAD_SCAN
-#define DEAD_SCAN 1              /* at a line end: 1 drive to it and look around (finds sharp corners); 0 turn back at once */
+#define DEAD_SCAN 2              /* at a line end: 1 drive to it and look around (finds sharp corners); 0 turn back at once */
 #endif
 #ifndef LOST_SWEEP
 #define LOST_SWEEP 1             /* before a dead end: sweep right and left for a line lost on a curve */
