@@ -55,6 +55,15 @@ a few tracks, the best third on more, and so on (successive halving).
   runs (control at speed needs work first) — input for the electronics agent.
 - **Tried and kept off:** arc turns (worse as written), edge inference (no clear gain). Both are options in config.h.
 
+## Update (19 Nov, night): finding junction mistakes automatically
+A left-hand wall follower that handled every junction correctly would reach the finish in about 30 m. So the robot is
+run as a pure left-hand follower and `lab/tools/lh_divergence.ts` finds the first junction where its path differs
+from the ideal one. Each difference is a junction-handling bug. Fixed this way so far: short stubs (shorter than the
+sensor arm), 5-way junctions (look all round), short dead ends (decide from the map), lines lost on curves (sweep),
+a last-resort match that ignored the junction's shape. The robot now follows the ideal route through about 25 of
+~50 junctions before its first mistake. With ~50 junctions per maze, reliability must reach ~99.9 % per junction.
+The robot file now uses 200 rpm motors (the listing); held-out sessions: 10/24, quicker finishes.
+
 ## What would close the gap
 1. Explore with less driving: the robot drives ~2× the maze's line length (revisits to reach untried branches).
 2. Faster turns that still land on the right line (arc turns, fixed).
