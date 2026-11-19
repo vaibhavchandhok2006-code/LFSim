@@ -14,7 +14,7 @@ import { Engine } from '../../src/worker/engine';
 const [ids, mode = 'run', defs = '', out = '/tmp/mz/out'] = process.argv.slice(2);
 const D = new URL('../firmware/examples/maze/main/', import.meta.url).pathname;
 const SET = new URL('../tracksets/rr-2027', import.meta.url).pathname;
-const exe = buildFirmware([D + 'main.c', D + 'hw.c', D + 'maze_map.c'], { defines: ['CONFIG_FREERTOS_HZ=1000', ...defs.split(',').filter(Boolean)] }).exe;
+const exe = buildFirmware([D + 'main.c', D + 'hw.c', D + 'maze_map.c', D + 'swath.c'], { defines: ['CONFIG_FREERTOS_HZ=1000', ...defs.split(',').filter(Boolean)] }).exe;
 const wiring = parseWiring(fs.readFileSync(D + 'wiring.json', 'utf8'));
 const { start } = loadInputs({ track: 'public/samples/roborun-sample.png', robot: 'lab/examples/rmi-test-rig.robot.json' });
 const m = loadTrackSet(SET);

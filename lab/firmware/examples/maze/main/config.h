@@ -67,6 +67,12 @@
 #endif
 
 /* ---- junctions */
+#ifndef SWATH
+#define SWATH 1                  /* 1: read junctions from the swath picture (angles); 0: left/straight/right pattern */
+#endif
+#ifndef READ_MM
+#define READ_MM 80.0             /* read the picture once the bar is this far past the junction */
+#endif
 #ifndef SCAN_MODE
 #define SCAN_MODE 0              /* 0: read branches from the pattern while passing; 1: spin once at each new junction */
 #endif

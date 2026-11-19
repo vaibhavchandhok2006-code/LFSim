@@ -17,6 +17,7 @@
 #include "config.h"
 #include "hw.h"
 #include "maze_map.h"
+#include "swath.h"
 #include "nvs.h"
 #include "nvs_flash.h"
 
@@ -159,7 +160,7 @@ static void snap_heading(void) {
 }
 
 /* ------------------------------------------------------------------ crossings seen by the sensor bar */
-typedef struct { double jx, jy, odo_end; int left, right, straight; } crossing_t;
+typedef struct { double jx, jy, odo_end; int left, right, straight; int ne; double rel[SW_MAX_EXITS]; double ldir; } crossing_t;
 #define QN 4
 static crossing_t q[QN];
 static int qn;
@@ -193,17 +194,66 @@ static int detect(void) {
         if (qn < QN) {
           crossing_t *k = &q[qn++];
           k->jx = (in_sx + sx) / 2; k->jy = (in_sy + sy) / 2; k->odo_end = ODO;
-          k->left = in_l; k->right = in_r; k->straight = -1;
+          k->left = in_l; k->right = in_r; k->straight = -1; k->ne = -1; k->ldir = TH;
         }
         det = 2;
       }
       break;
     case 2:
       if (wide) { if (qn) q[qn - 1].straight = 1; det = 1; in_odo = ODO; in_sx = sx; in_sy = sy; in_l = in_r = 0; break; }
-      if (qn && ODO - q[qn - 1].odo_end >= AHEAD_MM) { q[qn - 1].straight = centre() || b[2] || b[5]; det = 0; }
+      if (qn && ODO - q[qn - 1].odo_end >= AHEAD_MM) {
+        q[qn - 1].straight = centre() || b[2] || b[5]; det = 0;
+#if !SWATH
+        crossing_t *k = &q[qn - 1]; k->ne = 0;
+        if (k->left) k->rel[k->ne++] = 90;
+        if (k->straight) k->rel[k->ne++] = 0;
+        if (k->right) k->rel[k->ne++] = -90;
+#endif
+      }
       break;
   }
   return EV_NONE;
+}
+
+/* ------------------------------------------------------------------ the swath (junction pictures) */
+static double swath_odo = -1;
+static void swath_feed(void) {
+#if SWATH
+  if (swath_odo >= 0 && ODO - swath_odo < 1.0) return;
+  swath_odo = ODO;
+  double fx = cos(TH), fy = sin(TH);
+  for (int i = 0; i < NS; i++) {
+    double lat = (3.5 - i) * SPACING_MM;
+    swath_add(X + ARM_MM * fx - lat * fy, Y + ARM_MM * fy + lat * fx, c[i], ODO, TH);
+  }
+  swath_prune(ODO, 450);
+#endif
+}
+/* Read queued crossings once the bar is READ_MM past them. A crossing with nothing dark at its centre was not one. */
+static void swath_resolve(bool force) {
+#if SWATH
+  double sx, sy;
+  bar(&sx, &sy);
+  for (int i = 0; i < qn; i++) {
+    crossing_t *k = &q[i];
+    if (k->ne >= 0) continue;
+    double past = (sx - k->jx) * cos(TH) + (sy - k->jy) * sin(TH);
+    if (past < READ_MM && !(force && past > 15)) continue;
+    swath_reading_t r;
+    swath_read(k->jx, k->jy, k->ldir, SPACING_MM / 2, &r);
+    if (r.cells < 20) { printf("S t=%.2f nothing at %.0f,%.0f (cells %d, samples ok)\n", hw_us() / 1e6, k->jx, k->jy, r.cells); for (int j = i + 1; j < qn; j++) q[j - 1] = q[j]; qn--; i--; continue; }
+    k->jx = r.cx; k->jy = r.cy; k->ldir = r.line_dir; k->ne = 0;
+    /* the bar is past the junction now: if it sees no line, nothing goes straight on (the edge of the picture may
+     * still be inside the junction's own black patch) */
+    bool line_now = nb >= 1 && (b[2] || b[3] || b[4] || b[5]);
+    for (int j = 0; j < r.n; j++) if (line_now || fabs(r.deg[j]) >= 30) k->rel[k->ne++] = r.deg[j];
+    k->straight = 0;
+    for (int j = 0; j < k->ne; j++) if (fabs(k->rel[j]) < 30) k->straight = 1;
+    printf("S t=%.2f read %d:", hw_us() / 1e6, k->ne);
+    for (int j = 0; j < k->ne; j++) printf(" %.0f", k->rel[j]);
+    printf("\n");
+  }
+#endif
 }
 
 /* ------------------------------------------------------------------ turning on the spot */
@@ -211,7 +261,7 @@ static int detect(void) {
  * leaving the current one if it lies within COUNT_DEG of the target, or any line within CAPTURE_DEG of the target.
  * Returns the heading (tenths of a degree) where it was found, or -1 if no line was found in a full turn. */
 static int spin_to_(int target10, int dir, int skip);
-static int spin_to(int target10, int dir, int skip) { int64_t t0 = hw_us(); int r = spin_to_(target10, dir, skip); t_spin += (hw_us() - t0) / 1e6; n_turns++; return r; }
+static int spin_to(int target10, int dir, int skip) { int64_t t0 = hw_us(); int r = spin_to_(target10, dir, skip); t_spin += (hw_us() - t0) / 1e6; n_turns++; swath_clear(); swath_odo = -1; return r; }
 static int spin_to_(int target10, int dir, int skip) {
   double start = TH;
   bool was = centre(), left_first = !was;
@@ -247,7 +297,7 @@ static int spin_to_(int target10, int dir, int skip) {
 
 /* A full turn on the spot, recording the heading of every line under the centre sensors. */
 static int scan_(int out10[MAX_EXITS]);
-static int scan(int out10[MAX_EXITS]) { int64_t t0 = hw_us(); int r = scan_(out10); t_scan += (hw_us() - t0) / 1e6; return r; }
+static int scan(int out10[MAX_EXITS]) { int64_t t0 = hw_us(); int r = scan_(out10); t_scan += (hw_us() - t0) / 1e6; swath_clear(); swath_odo = -1; return r; }
 static int scan_(int out10[MAX_EXITS]) {
   double start = TH;
   bool was = centre();
@@ -409,7 +459,7 @@ static int choose(int n) {
 
 /* Which known junction is this? On a line we know, the one at its other end. On a new line, a known junction only if
  * it has an untried branch pointing back the way we came (closing a loop), or if it is very close. -1 = a new one. */
-static int locate(double jx, double jy, int h, int left, int right, int straight) {
+static int locate(double jx, double jy, int h, const int *obs, int nobs) {
   int expect = -1;
   if (cur_node >= 0 && cur_exit >= 0 && cur_exit < M.node[cur_node].n) {
     exit_t *e = &M.node[cur_node].ex[cur_exit];
@@ -439,9 +489,15 @@ static int locate(double jx, double jy, int h, int left, int right, int straight
     if (a < 0) continue;
     double score = d;
     if (M.node[i].ex[a].state == EX_NEW) score -= 40;           /* closing a loop through an untried branch */
-    if (left >= 0) {
-      int want[3] = { left, straight, right }, dirs[3] = { norm10(h + 900), h, norm10(h - 900) };
-      for (int j = 0; j < 3; j++) if (want[j] != (map_exit_near(i, dirs[j], 450) >= 0)) score += 60;
+    if (nobs >= 0) {
+      /* shape: every line seen should be a known exit, and every known exit (except back) should have been seen */
+      for (int j = 0; j < nobs; j++) if (map_exit_near(i, obs[j], 350) < 0) score += 60;
+      for (int e = 0; e < M.node[i].n; e++) {
+        if (e == a) continue;
+        int seen = 0;
+        for (int j = 0; j < nobs; j++) if (abs(angle_diff10(M.node[i].ex[e].dir, obs[j])) < 350) seen = 1;
+        if (!seen) score += 60;
+      }
     }
     if (score < bs) { bs = score; best = i; }
   }
@@ -453,10 +509,16 @@ static int locate(double jx, double jy, int h, int left, int right, int straight
 
 /* A junction at (jx, jy), `ahead_mm` in front of the axle: update the map and choose the way on. Returns the node and
  * sets *k to the exit to take (-1: no way on). The pose is corrected if the junction is already known. */
-static int junction_update(double jx, double jy, double ahead_mm, int left, int right, int straight, bool scanned, const int *dirs, int ndirs, int *k) {
+static int junction_update(double jx, double jy, double ahead_mm, const crossing_t *cr, bool scanned, const int *dirs, int ndirs, int *k) {
   int h = th10();
+  int obs[SW_MAX_EXITS], nobs = -1;
+  if (cr && cr->ne >= 0) {
+    int hl = norm10((int)lround(cr->ldir * 1800 / PI));
+    nobs = 0;
+    for (int j = 0; j < cr->ne; j++) obs[nobs++] = norm10(hl + (int)lround(cr->rel[j] * 10));
+  }
   g_ahead = ahead_mm;
-  int n = locate(jx, jy, h, scanned ? -1 : left, right, straight);
+  int n = locate(jx, jy, h, obs, nobs);
   bool fresh = n < 0;
   if (fresh) { n = map_add_node(jx, jy); if (n < 0) { *k = -1; return -1; } }
   else {
@@ -493,12 +555,10 @@ static int junction_update(double jx, double jy, double ahead_mm, int left, int 
   if (arr < 0) arr = map_add_exit(n, back);
   if (scanned && fresh) {
     for (int i = 0; i < ndirs; i++) if (abs(angle_diff10(dirs[i], back)) > 300 && map_exit_near(n, dirs[i], 300) < 0) map_add_exit(n, dirs[i]);
-  } else if (fresh || (KNOWN_ADD && p->n < 5)) {
-    int tol = fresh ? 450 : 600, cand[3], nc = 0;
-    if (left) cand[nc++] = norm10(h + 900);
-    if (straight) cand[nc++] = h;
-    if (right) cand[nc++] = norm10(h - 900);
-    for (int i = 0; i < nc; i++) if (map_exit_near(n, cand[i], tol) < 0) map_add_exit(n, cand[i]);
+  } else if (nobs >= 0 && (fresh || (KNOWN_ADD && p->n < 5))) {
+    /* the lines seen leaving; on a known junction only clearly new ones are added */
+    int tol = fresh ? 300 : 500;
+    for (int i = 0; i < nobs; i++) if (map_exit_near(n, obs[i], tol) < 0) map_add_exit(n, obs[i]);
   }
   if (on_dead) on_dead = false;
   else if (cur_node >= 0 && cur_exit >= 0 && arr >= 0) {
@@ -590,6 +650,8 @@ void app_main(void) {
     odometry(); sense();
     double dt = dt_s();
     int ev = detect();
+    swath_feed();
+    swath_resolve(false);
     if (ev == EV_FINISH) {
       if (cur_node >= 0 && cur_exit >= 0 && !on_dead) {
         M.node[cur_node].ex[cur_exit].state = EX_FINISH;
@@ -633,6 +695,11 @@ void app_main(void) {
       hw_wait_ms(LOOP_MS);
       continue;
     }
+    if (ev == EV_LINE_END && qn > 0) {
+      /* the line ended just after a junction (a corner or a T): read it now rather than treat it as a dead end */
+      swath_resolve(true);
+      if (qn > 0 && q[0].ne >= 0) { if (q[0].straight < 0) q[0].straight = 0; ev = EV_NONE; }
+    }
     if (ev == EV_LINE_END) {
       double ex = X + ARM_MM * cos(TH), ey = Y + ARM_MM * sin(TH);
 #if DEAD_SCAN
@@ -645,7 +712,7 @@ void app_main(void) {
       int back = norm10(th10() + 1800), others = 0;
       for (int i = 0; i < m; i++) if (abs(angle_diff10(dirs[i], back)) > 400) others++;
       if (others > 0) {
-        int k, n = junction_update(X, Y, 0, 0, 0, 0, true, dirs, m, &k);
+        int k, n = junction_update(X, Y, 0, NULL, true, dirs, m, &k);
         if (n < 0 || k < 0) stop_forever("no way on");
         cur_node = n; cur_exit = k;
         turn_onto(n, k);
@@ -663,7 +730,7 @@ void app_main(void) {
       det_reset(); th_hold = TH;
       continue;
     }
-    if (qn > 0 && q[0].straight >= 0) {
+    if (qn > 0 && q[0].straight >= 0 && q[0].ne >= 0) {
       /* a junction ahead is fully seen: decide now, before reaching it */
       crossing_t c0 = q[0];
       for (int i = 1; i < qn; i++) q[i - 1] = q[i];
@@ -678,7 +745,7 @@ void app_main(void) {
         hw_motors(0, 0);
         int dirs[MAX_EXITS];
         int m = scan(dirs);
-        n = junction_update(c0.jx, c0.jy, 0, 0, 0, 0, true, dirs, m, &k);
+        n = junction_update(c0.jx, c0.jy, 0, NULL, true, dirs, m, &k);
         if (n < 0 || k < 0) stop_forever("no way on");
         cur_node = n; cur_exit = k;
         turn_onto(n, k);
@@ -689,19 +756,19 @@ void app_main(void) {
       }
 #endif
 #if !CORNER_NODES
-      if (c0.straight == 0 && (c0.left ^ c0.right)) {
+      if (c0.ne == 1 && fabs(c0.rel[0]) >= 30) {
         /* a plain corner: one way on. Turn there without a map entry; the line continues to the next junction */
-        turn_pending = true; pend_n = -1; pend_k = norm10(th10() + (c0.left ? 900 : -900));
+        turn_pending = true; pend_n = -1; pend_k = norm10((int)lround(c0.ldir * 1800 / PI + c0.rel[0] * 10));
         pend_x = X + ahead * cos(TH); pend_y = Y + ahead * sin(TH);
         th_hold = TH; qn = 0;
-        printf("C t=%.2f corner %s\n", hw_us() / 1e6, c0.left ? "left" : "right");
+        printf("C t=%.2f corner %.0f\n", hw_us() / 1e6, c0.rel[0]);
         steer(SPEED_JUNCTION, dt, false, th_hold);
         hw_wait_ms(LOOP_MS);
         continue;
       }
 #endif
       double cx = c0.jx, cy = c0.jy;
-      n = junction_update(cx, cy, ahead, c0.left, c0.right, c0.straight, false, NULL, 0, &k);
+      n = junction_update(cx, cy, ahead, &c0, false, NULL, 0, &k);
       if (n < 0 || k < 0) stop_forever("no way on");
       cur_node = n; cur_exit = k;
       depart_odo = ODO + ahead;

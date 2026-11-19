@@ -1,7 +1,7 @@
 {
   "schema": "lfsim-lab/search",
   "version": 1,
-  "sources": ["main/main.c", "main/hw.c", "main/maze_map.c"],
+  "sources": ["main/main.c", "main/hw.c", "main/maze_map.c", "main/swath.c"],
   "wiring": "main/wiring.json",
   "robot": "../../../examples/rmi-test-rig.robot.json",
   "defines": ["CONFIG_FREERTOS_HZ=1000"],
