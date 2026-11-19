@@ -15,6 +15,8 @@ npm run lab -- run --track public/samples/roborun-sample.png --robot my.robot.js
 npm run lab -- run --track public/samples/roborun-sample.png --robot lab/examples/rmi-test-rig.robot.json \
   --firmware lab/firmware/examples/rmi-test-rig/main/main.c --wiring lab/firmware/examples/rmi-test-rig/main/wiring.json \
   --presses 4@0.3,4@3.8,4@4.3 --sweep 0.5-3.6 --serial serial.txt
+# whole sessions / benchmarks with your C firmware (a design file names the sources, wiring and operator steps)
+npm run lab -- bench --set lab/tracksets/rr-2027 --part held --design lab/examples/rmi-native.design.json --limit 6
 npm run lab -- run --track photo.png --corners 47.5,37.8,96.6,53.1,73.6,103.3,1.6,69.7 --track-png flat.png
 
 npm run lab -- tracks make --out lab/tracksets/rr-2027        # 300 tuning + 200 held-out variations of the Shaastra maze
@@ -60,3 +62,28 @@ Windows setup: [docs/WINDOWS_SETUP.md](docs/WINDOWS_SETUP.md).
 The simulator code is shared with the website (`src/`); the track is built by `src/track/buildTrack.ts` in both. The
 maze generator (`src/track/generate.ts`) and the photo flattening (`src/track/warp.ts`) are plain TypeScript in `src/`
 so the website can use them too.
+
+## Design files with C firmware
+
+A design can name C firmware instead of Settings-mode values (see `examples/rmi-native.design.json`):
+
+```json
+"firmware": {
+  "sources": ["../firmware/examples/rmi-test-rig/main/main.c"],
+  "wiring": "../firmware/examples/rmi-test-rig/main/wiring.json",
+  "defines": ["CONFIG_FREERTOS_HZ=1000"],
+  "operator": {
+    "first": { "presses": [{ "gpio": 4, "at_s": 0.3 }], "sweep": { "from_s": 0.5, "to_s": 3.6 } },
+    "each":  { "presses": [{ "gpio": 4, "at_s": 0.3 }] }
+  }
+}
+```
+
+- Paths are relative to the design file. `first` is what the operator does before the first run, `each` before
+  every later run (leave `first` out to use `each` every time).
+- Each run is a **reset**: the firmware starts fresh (RAM empty), but **flash (NVS) keeps** what earlier runs saved,
+  so a maze robot can store its route with `nvs_set_blob` and read it back on the next run.
+- **Switches**: a plan step can set GPIO levels, e.g. `"memory": [{ "name": "fast", "settings": {}, "levels": [{ "gpio": 27, "level": 1 }] }]`.
+  The firmware reads them with `gpio_get_level`. Changing switches in the scored part counts as an adjustment (2027).
+- The operator moves from the explore setting to the memory settings after the robot has finished once.
+- Pins used by the sensors, ADC, driver or encoders can't be used for switches or buttons (checked on load).

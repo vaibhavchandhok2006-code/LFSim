@@ -115,6 +115,7 @@ export class NativeFirmwareBrain extends FirmwareBrain {
         if (m.f === '__print') { (api.printf as (f: string, ...a: unknown[]) => void)('%s', m.a[0]); continue; }
         if (m.f === '__log') { const fn = api[`ESP_LOG${m.a[0]}`] as ((t: string, f: string, ...a: unknown[]) => void) | undefined; fn?.(String(m.a[1]), '%s', m.a[2]); continue; }
         if (m.f === '__fail') throw new Error(String(m.a[0]));
+        if (m.f.startsWith('__nvs_')) { this.nvs(m.f, m.a, child); continue; }
         const fn = api[m.f];
         if (typeof fn !== 'function') throw new Error(`${m.f}() is not simulated yet.`);
         const args = m.a.map(conv);
@@ -128,5 +129,26 @@ export class NativeFirmwareBrain extends FirmwareBrain {
       rl.close();
       this.dispose();
     }
+  }
+
+  // Simulated flash (NVS): stored in the session's memory so it survives between runs, as flash survives a power
+  // cycle. Values are kept as bytes (hex) with their type; reading a key as another type finds nothing, as on the chip.
+  private nvs(f: string, a: unknown[], child: ChildProcessWithoutNullStreams) {
+    const flash = this.flash();
+    const ns = String(a[0]);
+    const k = (key: unknown) => `nvs/${ns}/${String(key)}`;
+    if (f === '__nvs_set') {
+      const hex = String(a[3]);
+      if (!/^[0-9a-f]*$/.test(hex) || hex.length > 8000) throw new Error('Firmware wrote an invalid value to flash.');
+      flash[k(a[1])] = { type: String(a[2]), hex };
+    } else if (f === '__nvs_get') {
+      const v = flash[k(a[1])] as { type: string; hex: string } | undefined;
+      const want = String(a[2]);
+      if (!v || (want !== '*' && v.type !== want)) child.stdin.write('T -1\n');
+      else child.stdin.write(`T ${v.hex.length / 2} ${v.hex}\n`);
+    } else if (f === '__nvs_erase') {
+      const prefix = ns === '*' ? 'nvs/' : a[1] === null ? `nvs/${ns}/` : k(a[1]);
+      for (const key of Object.keys(flash)) if (a[1] === null || ns === '*' ? key.startsWith(prefix) : key === prefix) delete flash[key];
+    } else throw new Error(`${f}() is not simulated.`);
   }
 }

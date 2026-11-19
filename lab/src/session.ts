@@ -6,14 +6,16 @@
 // an adjustment (+3 s in round 1). Finished runs get the time score; runs that stop short get (time + penalties) / C
 // for the furthest checkpoint covered. The official result is the best finished run, else the best checkpoint score.
 import { Engine } from '../../src/worker/engine';
-import type { StartMsg } from '../../src/worker/protocol';
+import type { OperatorScript, StartMsg, Wiring } from '../../src/worker/protocol';
+import { NativeFirmwareBrain } from './native';
 import type { SettingsParams } from '../../src/brain/settings';
 import { Rng } from '../../src/sim/sensors';
 import { checkpointScore, timeScore, type Competition } from './competition';
 
 // One position of the robot's switches: the settings it changes (speeds, algorithm). In Code mode switches are read by
 // the firmware (Phase 2); here they apply to Settings mode.
-export interface SwitchSetting { name: string; settings: Partial<SettingsParams> }
+// One switch position: Settings-mode values, and/or GPIO levels that the firmware reads (native firmware designs).
+export interface SwitchSetting { name: string; settings: Partial<SettingsParams>; levels?: { gpio: number; level: 0 | 1 }[] }
 
 export interface SessionPlan {
   explore: SwitchSetting;        // used until the robot holds a complete route in memory
@@ -67,15 +69,17 @@ export interface SessionOptions {
   seed: number;                 // placement jitter per run
   placement?: { pos_mm: number; angle_deg: number }; // how precisely the operator places the robot (estimate)
   checkpoints?: Checkpoint[];
+  // Native C firmware (Phase 2): each run starts a fresh firmware process (a reset), flash carries over.
+  firmware?: { exe: string; wiring: Wiring; operator: { first?: OperatorScript; each: OperatorScript } };
 }
 
 const CHUNK = 0.05;
 
 export async function runSession(o: SessionOptions): Promise<SessionResult> {
   const c = o.competition, op = c.operator;
-  if (o.base.brain.mode !== 'settings') throw new Error('Session simulation drives Settings mode in Phase 1 (Code mode switches arrive with Phase 2).');
+  if (!o.firmware && o.base.brain.mode !== 'settings') throw new Error('Session simulation drives Settings mode or native firmware (give options.firmware).');
   const dry = c.session.dryRunAllowed ? Math.max(0, Math.min(c.session.access_s, o.plan.dry_s ?? 0)) : 0;
-  const baseSettings = o.base.brain.settings;
+  const baseSettings = o.base.brain.mode === 'settings' ? o.base.brain.settings : null;
   const track = o.base.track;
   const fin = track.finish;
   const fx = fin ? ((fin.x0 + fin.x1) / 2) * track.res : 0, fy = fin ? ((fin.y0 + fin.y1) / 2) * track.res : 0;
@@ -91,7 +95,10 @@ export async function runSession(o: SessionOptions): Promise<SessionResult> {
   const runs: RunRecord[] = [];
   let closest = Infinity;
 
-  const hasRoute = () => Object.values(memory).some((v) => typeof v === 'object' && v !== null && (v as { complete?: boolean }).complete === true);
+  // Settings mode marks a complete route in memory. Firmware memory is the firmware's own business: the operator
+  // switches to memory runs once the robot has finished once (they saw it reach the finish).
+  const hasRoute = () => o.firmware ? runs.some((r) => r.end === 'finished')
+    : Object.values(memory).some((v) => typeof v === 'object' && v !== null && (v as { complete?: boolean }).complete === true);
 
   for (let index = 0; index < 300; index += 1) {
     const phase: 'explore' | 'memory' = hasRoute() ? 'memory' : 'explore';
@@ -112,8 +119,17 @@ export async function runSession(o: SessionOptions): Promise<SessionResult> {
     const jitter = { x: rng.gauss() * place.pos_mm / 1000, y: rng.gauss() * place.pos_mm / 1000, th: (rng.gauss() * place.angle_deg * Math.PI) / 180 };
     const sp = track.startPose;
     const runTrack = { ...track, startPose: { x: sp.x + jitter.x, y: sp.y + jitter.y, theta: sp.theta + jitter.th } };
-    const settings: SettingsParams = { ...baseSettings, ...sw.settings };
-    const e = new Engine({ type: 'start', runId: index + 1, ...o.base, track: runTrack, brain: { mode: 'settings', settings }, memory }, { record: false });
+    let e: Engine;
+    if (o.firmware) {
+      const fw = o.firmware;
+      const script = index === 0 && fw.operator.first ? fw.operator.first : fw.operator.each;
+      const operator: OperatorScript = { ...script, levels: [...(script.levels ?? []), ...(sw.levels ?? [])] };
+      e = new Engine({ type: 'start', runId: index + 1, ...o.base, track: runTrack, brain: { mode: 'code', code: '', wiring: fw.wiring }, memory, operator },
+        { record: false, firmware: (m) => new NativeFirmwareBrain(fw.exe, fw.wiring, m.profile, operator) });
+    } else {
+      const settings: SettingsParams = { ...baseSettings!, ...sw.settings };
+      e = new Engine({ type: 'start', runId: index + 1, ...o.base, track: runTrack, brain: { mode: 'settings', settings }, memory }, { record: false });
+    }
     const s = e.sim;
     let end: RunEnd | null = null;
     let endT = 0;
@@ -122,6 +138,7 @@ export async function runSession(o: SessionOptions): Promise<SessionResult> {
     let lastProgT = 0, lastDist = 0;
     let reached = 0;
     const limit = Math.min(budget, op.giveUpAfter_s);
+    try {
     const covered = () => { for (const cp of cps) if (cp.C > reached && Math.hypot(s.body.x - cp.x, s.body.y - cp.y) < CHECKPOINT_RADIUS_M) reached = cp.C; };
     while (end === null) {
       await e.advance(Math.min(limit, s.time + CHUNK));
@@ -154,6 +171,7 @@ export async function runSession(o: SessionOptions): Promise<SessionResult> {
     if (end === 'finished') {
       while (!s.brain.finished() && s.time < endT + 3 && e.status === 'running') { await e.advance(s.time + CHUNK); e.drain(); covered(); }
     }
+    } finally { e.dispose(); } // stop the firmware process; the run's results stay in e.sim
     const b = s.body;
     if (fin) closest = Math.min(closest, Math.hypot(b.x - fx, b.y - fy));
     const left = s.startTime !== null;

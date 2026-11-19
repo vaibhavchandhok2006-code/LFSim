@@ -39,9 +39,11 @@ browser smoke test passes. Next: reality check against the real robot.
 - [x] Phase 2: your ESP-IDF C firmware compiled with GCC against a hardware shim and run unchanged in the simulator
       (`run --firmware`); button presses with interrupts and a calibration sweep; C = JS proved on 20 tracks;
       both examples build for ESP32 in CI (esp32.yml)
-- [ ] Later in Phase 2 scope: sessions and benchmarks with native firmware; Arduino .ino (C++ shim); NVS, PCNT,
+- [x] Sessions and benchmarks with native firmware (design files), flash (NVS) kept between runs, switches as GPIO levels
+- [ ] Later in Phase 2 scope: Arduino .ino (C++ shim); PCNT,
       extra FreeRTOS tasks; a sandbox for AI-written native code (before Phase 5)
-- [ ] Phase 3–8: see the spec
+- [ ] Phase 3 (calibration): waiting for a working robot
+- [ ] Phase 5 (algorithm agent) next, then Phase 4; 6–8: see the spec
 - Findings for later phases: the current robot with LSRB / Trémaux often drives back into the start square (aborts
   the run) and explores slowly on dense mazes — work for the algorithm agent (Phase 5)
 

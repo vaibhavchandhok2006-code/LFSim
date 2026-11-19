@@ -6,6 +6,7 @@ import type { Design } from './design';
 import { loadTrackSet, type Part } from './tracksets';
 import { runJob, type Job, type JobResult } from './benchJob';
 import { VARIATIONS } from './variations';
+import { buildFirmware } from './native';
 
 export interface BenchOptions {
   setDir: string; part: Part; design: Design; competition: Competition;
@@ -21,6 +22,8 @@ export async function runBench(o: BenchOptions): Promise<JobResult[]> {
   if (o.limit) entries = entries.slice(0, o.limit);
   if (!entries.length) throw new Error(`The set has no ${o.part} tracks.`);
   const nv = Math.max(1, Math.min(VARIATIONS.length, Math.round(o.variations)));
+  // Native firmware: compile once here (cached by source hash); the workers only start the built program.
+  if (o.design.firmware && !o.design.firmware.exe) o.design.firmware.exe = buildFirmware(o.design.firmware.sources, { defines: o.design.firmware.defines }).exe;
   const jobs: Job[] = [];
   for (const entry of entries) for (let v = 0; v < nv; v += 1) jobs.push({ jobId: jobs.length, setDir: o.setDir, entry, variation: v, design: o.design, competition: o.competition });
   const results: JobResult[] = new Array(jobs.length);

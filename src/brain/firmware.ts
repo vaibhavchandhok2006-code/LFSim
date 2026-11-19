@@ -55,6 +55,7 @@ export class FirmwareBrain implements Brain {
     this.code = code; this.wiring = wiring; this.profile = profile; this.operator = operator;
     // Buttons rest at their released level; the operator's presses become timed edges.
     for (const b of wiring.buttons ?? []) this.pinLevel.set(b.gpio, b.activeLow ? 1 : 0);
+    for (const l of operator?.levels ?? []) this.pinLevel.set(l.gpio, l.level ? 1 : 0);
     for (const p of operator?.presses ?? []) {
       this.pressEvents.push({ t: p.at_s, gpio: p.gpio, down: true }, { t: p.at_s + (p.hold_s ?? 0.15), gpio: p.gpio, down: false });
     }
@@ -69,6 +70,8 @@ export class FirmwareBrain implements Brain {
   private mcpwm5: { timers: { period: number }[]; ops: { timer: number }[]; cmps: { op: number; value: number }[]; gens: { op: number; gpio: number; cmp: number | null; force: number | null }[] } = { timers: [], ops: [], cmps: [], gens: [] };
 
   attach(sim: Simulation) { this.sim = sim; }
+  // Flash storage shared by every run of a session (EEPROM / Preferences / NVS all live in sim.memory).
+  protected flash(): Record<string, unknown> { const m = this.sim.memory as { prefs?: Record<string, unknown> }; m.prefs ??= {}; return m.prefs; }
 
   // Brain interface (most of it is unused: the firmware runs itself)
   reset(_io: BrainIO): void {}

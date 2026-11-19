@@ -72,3 +72,30 @@ describe('native firmware in the loop', () => {
     expect(() => buildFirmware([path.join(dir, 'missing.c')])).toThrow(/not found/);
   });
 });
+
+describe('native firmware: flash and switches', () => {
+  it('NVS keeps values between runs (as flash between power cycles); switch levels reach gpio_get_level', async () => {
+    const exe = buildFirmware([new URL('../firmware/tests/nvs_switch.c', import.meta.url).pathname]).exe;
+    const { start } = loadInputs({ track: 'public/samples/roborun-sample.png', robot: ROBOT });
+    const wiring = wiringOf(REF);
+    let memory: Record<string, unknown> = {};
+    const outs: string[][] = [];
+    for (const level of [1, 0] as const) {
+      const operator = { presses: [], levels: [{ gpio: 27, level }] };
+      const lines: string[] = [];
+      const msg = { ...start, brain: { mode: 'code' as const, code: '', wiring }, operator, memory };
+      const { engine, summary } = await runHeadless(msg, { seconds: 0.5, stopAtFinish: false, onConsole: (_t, l) => lines.push(l), firmware: (m) => new NativeFirmwareBrain(exe, wiring, m.profile, operator) });
+      expect(summary.status, summary.error ?? '').not.toBe('error');
+      memory = JSON.parse(JSON.stringify(engine.sim.memory));
+      outs.push(lines);
+    }
+    expect(outs[0]).toContain('get runs: not-found 0');
+    expect(outs[0]).toContain('switch: 1');
+    expect(outs[0]).toContain('i32 read as u8: not-found');
+    expect(outs[0]).toContain('key too long: rejected');
+    expect(outs[1]).toContain('get runs: ok 1');
+    expect(outs[1]).toContain('route 4 bytes: LSRB');
+    expect(outs[1]).toContain('name (4): rmi');
+    expect(outs[1]).toContain('switch: 0');
+  }, 120_000);
+});

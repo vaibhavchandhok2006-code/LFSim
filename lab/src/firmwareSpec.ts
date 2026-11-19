@@ -37,3 +37,45 @@ export function parseOperator(presses?: string, sweep?: string): OperatorScript 
   }
   return { presses: ps, ...(sw ? { sweep: sw } : {}) };
 }
+
+// Pins the robot itself drives or reads: a switch or button must not sit on one of them.
+export function usedPins(w: Wiring): Set<number> {
+  const d = w.driver;
+  const pins = [...w.sensorPins, ...w.adcChannels.map((a) => a.gpio), d.leftPwm, d.leftIn1, d.leftIn2, d.rightPwm, d.rightIn1, d.rightIn2];
+  if (d.standby !== null) pins.push(d.standby);
+  if (w.encoders) pins.push(w.encoders.leftA, w.encoders.leftB, w.encoders.rightA, w.encoders.rightB);
+  return new Set(pins);
+}
+
+// An operator script or switch levels from an untrusted design file.
+export function parseLevels(v: unknown, w: Wiring, where: string): { gpio: number; level: 0 | 1 }[] {
+  if (v === undefined) return [];
+  const used = usedPins(w);
+  if (!Array.isArray(v) || v.length > 16) throw new Error(`${where}: levels must be a list of up to 16 { gpio, level } entries.`);
+  return v.map((l: { gpio?: unknown; level?: unknown }) => {
+    if (!isInt(l.gpio) || (l.level !== 0 && l.level !== 1)) throw new Error(`${where}: each level needs gpio (0–64) and level (0 or 1).`);
+    if (used.has(l.gpio as number)) throw new Error(`${where}: GPIO ${l.gpio} is already a sensor, ADC, driver or encoder pin in the wiring.`);
+    return { gpio: l.gpio as number, level: l.level as 0 | 1 };
+  });
+}
+export function parseOperatorScript(v: unknown, w: Wiring, where: string): OperatorScript {
+  if (!v || typeof v !== 'object') throw new Error(`${where}: expected { presses, sweep?, levels? }.`);
+  const o = v as { presses?: unknown; sweep?: { from_s?: unknown; to_s?: unknown; period_s?: unknown }; levels?: unknown };
+  const used = usedPins(w);
+  const num = (x: unknown, lo: number, hi: number) => typeof x === 'number' && Number.isFinite(x) && x >= lo && x <= hi;
+  const presses = o.presses ?? [];
+  if (!Array.isArray(presses) || presses.length > 50) throw new Error(`${where}: presses must be a list of up to 50 { gpio, at_s, hold_s? }.`);
+  const ps = presses.map((p: { gpio?: unknown; at_s?: unknown; hold_s?: unknown }) => {
+    if (!isInt(p.gpio) || !num(p.at_s, 0, 600) || !(p.hold_s === undefined || num(p.hold_s, 0.01, 10))) throw new Error(`${where}: each press needs gpio, at_s (0–600 s) and optional hold_s.`);
+    if (used.has(p.gpio as number)) throw new Error(`${where}: GPIO ${p.gpio} is already used by the sensors or driver.`);
+    return { gpio: p.gpio as number, at_s: p.at_s as number, ...(p.hold_s !== undefined ? { hold_s: p.hold_s as number } : {}) };
+  });
+  let sweep: OperatorScript['sweep'];
+  if (o.sweep !== undefined) {
+    const sw = o.sweep;
+    if (!num(sw.from_s, 0, 600) || !num(sw.to_s, 0, 600) || (sw.to_s as number) <= (sw.from_s as number) || !(sw.period_s === undefined || num(sw.period_s, 0.1, 10))) throw new Error(`${where}: sweep needs from_s < to_s (seconds) and optional period_s.`);
+    sweep = { from_s: sw.from_s as number, to_s: sw.to_s as number, ...(sw.period_s !== undefined ? { period_s: sw.period_s as number } : {}) };
+  }
+  const levels = parseLevels(o.levels, w, where);
+  return { presses: ps, ...(sweep ? { sweep } : {}), ...(levels.length ? { levels } : {}) };
+}

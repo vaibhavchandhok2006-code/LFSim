@@ -21,6 +21,7 @@ export async function runJob(j: Job): Promise<JobResult> {
     const seed = jobSeed(j.entry, j.variation);
     const result = await runSession({
       competition: j.competition, seed, plan: j.design.plan, checkpoints: j.entry.checkpoints,
+      ...(j.design.firmware ? { firmware: { exe: j.design.firmware.exe!, wiring: j.design.firmware.wiring, operator: j.design.firmware.operator } } : {}),
       base: {
         track, profile: j.design.robot, brain: { mode: 'settings', settings: j.design.settings }, flags: ALL_ON,
         disturbances: disturbancesFor(VARIATIONS[j.variation], seed), offLine_cm: 4, memory: {},

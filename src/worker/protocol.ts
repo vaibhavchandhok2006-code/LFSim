@@ -32,6 +32,8 @@ export interface Wiring {
 export interface OperatorScript {
   presses: { gpio: number; at_s: number; hold_s?: number }[];
   sweep?: { from_s: number; to_s: number; period_s?: number };
+  // Switches the operator set before the run (DIP or slide switches): a fixed level on each GPIO for the whole run.
+  levels?: { gpio: number; level: 0 | 1 }[];
 }
 
 export interface StartMsg {

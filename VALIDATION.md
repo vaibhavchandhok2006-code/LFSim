@@ -177,3 +177,6 @@ CSV / PNG / HTML report / GIF (2.0 MB) downloads, dark theme. No page or worker 
 | RMI test-rig firmware, unchanged, with presses on GPIO 4 at 0.3 / 3.8 / 4.3 s and a sweep 0.5–3.6 s | calibrates, starts after the third press, drives | starts at > 4.2 s, drives > 1 m (test); CLI: 10.44 m in 40 s simulated, 27× real time |
 | Firmware with a compile error | clear error with the GCC message, no run | pass (test) |
 | Both examples built with ESP-IDF v5.2 for ESP32 (GitHub workflow esp32.yml) | build succeeds | success (run 44388197038) |
+| Flash (NVS) keeps i32, blob and string values between runs; wrong type and over-long names are refused; switch levels read back | as on the chip | pass (test) |
+| A session with native firmware: each run a reset, flash counts the resets, plan stays on explore until a finish | pass | pass (test, 22 runs) |
+| RMI firmware, whole sessions, 6 held-out stage-1 tracks | runs without errors | 6 sessions in 52 s; 0 finishes; 122 of 124 runs leave the mat (plain line follower, no maze logic) |
