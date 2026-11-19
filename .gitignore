@@ -15,3 +15,4 @@ lab/.cache/
 lab/firmware/examples/*/build/
 lab/firmware/examples/*/sdkconfig
 lab/firmware/examples/*/sdkconfig.old
+lab/results/

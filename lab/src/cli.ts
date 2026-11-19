@@ -16,6 +16,7 @@ import type { FirmwareBrain } from '../../src/brain/firmware';
 import type { StartMsg } from '../../src/worker/protocol';
 import { designFromRobot, loadDesign } from './design';
 import { runBench, summarise } from './bench';
+import { loadSpace, runSearch, formatRanked } from './search';
 import { writeProgress, writeResults } from './report';
 import { VARIATIONS } from './variations';
 import { loadInputs, type InputOptions } from './inputs';
@@ -34,6 +35,8 @@ Commands
   tracks sheet  Review page: sample tracks and the set's statistics beside a reference maze
                 (--set <folder> [--count 20] [--reference <track.png>])
   bench         Run a design over a track set: full 10-minute sessions, report folder
+  search        Try many build-time variants of a firmware (config.h values) on a track set and rank them
+                (--space file.json --out dir --workers N --samples N)
   doctor        Check Node.js, Git, a C compiler and Claude Code on this computer
 
 tracks make options
@@ -122,6 +125,7 @@ export async function main(argv: string[]): Promise<number> {
   }
   if (cmd === 'tracks make' || cmd === 'tracks check' || cmd === 'tracks sheet') return tracksCmd(cmd, flags);
   if (cmd === 'bench') return benchCmd(flags);
+  if (cmd === 'search') return searchCmd(flags);
   if (cmd !== 'run') throw new Error(`Unknown command "${cmd}". Try: npm run lab -- help`);
   const known = new Set(['project', 'track', 'robot', 'mode', 'algorithm', 'seed', 'memory', 'seconds', 'keep-going', 'csv', 'json', 'save-memory', 'chunk', 'corners', 'track-png', 'firmware', 'wiring', 'presses', 'sweep', 'freertos-hz', 'serial']);
   for (const k of flags.keys()) if (!known.has(k)) throw new Error(`Unknown option --${k}`);
@@ -226,6 +230,18 @@ async function tracksCmd(cmd: string, flags: Map<string, string | true>): Promis
   for (const b of bad) process.stdout.write(`${b.id}: ${b.problems.join('; ')}\n`);
   process.stdout.write(`${res.length - bad.length}/${res.length} tracks pass every check\n`);
   return bad.length ? 1 : 0;
+}
+
+async function searchCmd(flags: Map<string, string | true>): Promise<number> {
+  const spaceFile = str(flags, 'space');
+  if (!spaceFile) throw new Error('search needs --space <file.json> (see lab/firmware/examples/maze/search.json).');
+  const sp = loadSpace(spaceFile);
+  const out = str(flags, 'out') ?? `lab/results/search-${new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-')}`;
+  const r = await runSearch(sp, out, { workers: num(flags, 'workers'), samples: num(flags, 'samples'), log: (s) => process.stderr.write(s) });
+  process.stdout.write(`\nbest of ${r.board.length} variants (${r.minutes.toFixed(1)} min):\n`);
+  for (const b of r.board.slice(0, 5)) process.stdout.write(`  ${formatRanked(b)}\n`);
+  process.stdout.write(`leaderboard  ${out}/leaderboard.csv\nbest         ${out}/best.json\n`);
+  return 0;
 }
 
 async function benchCmd(flags: Map<string, string | true>): Promise<number> {

@@ -407,7 +407,7 @@ static int choose(int n) {
 
 /* Which known junction is this? On a line we know, the one at its other end. On a new line, a known junction only if
  * it has an untried branch pointing back the way we came (closing a loop), or if it is very close. -1 = a new one. */
-static int locate(double jx, double jy, int h) {
+static int locate(double jx, double jy, int h, int left, int right, int straight) {
   int expect = -1;
   if (cur_node >= 0 && cur_exit >= 0 && cur_exit < M.node[cur_node].n) {
     exit_t *e = &M.node[cur_node].ex[cur_exit];
@@ -415,15 +415,23 @@ static int locate(double jx, double jy, int h) {
     else if (e->state == EX_EDGE && e->to != 0) expect = e->to;
   }
   if (expect >= 0 && hypot(M.node[expect].x - jx, M.node[expect].y - jy) < EXPECT_MM) return expect;
+  /* by place and shape: a known junction nearby with a line back towards us and the branches the bar just saw */
   int back = norm10(h + 1800), best = -1;
-  double bd = LOOP_MM;
+  double bs = 1e18;
   for (int i = 1; i < M.count; i++) {
     double d = hypot(M.node[i].x - jx, M.node[i].y - jy);
-    if (d >= bd) continue;
+    if (d >= RELOC_MM) continue;
     int a = map_exit_near(i, back, 450);
-    if (a >= 0 && M.node[i].ex[a].state == EX_NEW) { bd = d; best = i; }
+    if (a < 0) continue;
+    double score = d;
+    if (M.node[i].ex[a].state == EX_NEW) score -= 40;           /* closing a loop through an untried branch */
+    if (left >= 0) {
+      int want[3] = { left, straight, right }, dirs[3] = { norm10(h + 900), h, norm10(h - 900) };
+      for (int j = 0; j < 3; j++) if (want[j] != (map_exit_near(i, dirs[j], 450) >= 0)) score += 60;
+    }
+    if (score < bs) { bs = score; best = i; }
   }
-  if (best >= 0) return best;
+  if (best >= 0 && bs < RELOC_MM) return best;
   return map_find(jx, jy, MATCH_MM);
 }
 
@@ -431,7 +439,7 @@ static int locate(double jx, double jy, int h) {
  * sets *k to the exit to take (-1: no way on). The pose is corrected if the junction is already known. */
 static int junction_update(double jx, double jy, double ahead_mm, int left, int right, int straight, bool scanned, const int *dirs, int ndirs, int *k) {
   int h = th10();
-  int n = locate(jx, jy, h);
+  int n = locate(jx, jy, h, scanned ? -1 : left, right, straight);
   bool fresh = n < 0;
   if (fresh) { n = map_add_node(jx, jy); if (n < 0) { *k = -1; return -1; } }
   else {

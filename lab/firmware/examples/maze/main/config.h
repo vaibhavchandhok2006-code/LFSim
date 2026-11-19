@@ -90,8 +90,8 @@
 #ifndef EXPECT_MM
 #define EXPECT_MM 250.0          /* on a known line, the junction at its end is accepted within this distance */
 #endif
-#ifndef LOOP_MM
-#define LOOP_MM 130.0            /* closing a loop: a known junction with an untried branch towards us, within this */
+#ifndef RELOC_MM
+#define RELOC_MM 150.0           /* a known junction this close with a matching shape is the same junction */
 #endif
 #ifndef HEAD_FIX_DEG
 #define HEAD_FIX_DEG 0.0         /* at a known junction, correct the heading from the arrival line if within this (0 = off) */
