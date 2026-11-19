@@ -160,7 +160,7 @@ static void snap_heading(void) {
 }
 
 /* ------------------------------------------------------------------ crossings seen by the sensor bar */
-typedef struct { double jx, jy, odo_end; int left, right, straight; int ne; double rel[SW_MAX_EXITS]; double ldir; } crossing_t;
+typedef struct { double jx, jy, odo_end; int left, right, straight; int ne; double rel[SW_MAX_EXITS]; double ldir; bool complex; } crossing_t;
 #define QN 4
 static crossing_t q[QN];
 static int qn;
@@ -194,7 +194,7 @@ static int detect(void) {
         if (qn < QN) {
           crossing_t *k = &q[qn++];
           k->jx = (in_sx + sx) / 2; k->jy = (in_sy + sy) / 2; k->odo_end = ODO;
-          k->left = in_l; k->right = in_r; k->straight = -1; k->ne = -1; k->ldir = TH;
+          k->left = in_l; k->right = in_r; k->straight = -1; k->ne = -1; k->ldir = TH; k->complex = false;
         }
         det = 2;
       }
@@ -249,11 +249,45 @@ static void swath_resolve(bool force) {
     for (int j = 0; j < r.n; j++) if (line_now || fabs(r.deg[j]) >= 30) k->rel[k->ne++] = r.deg[j];
     k->straight = 0;
     for (int j = 0; j < k->ne; j++) if (fabs(k->rel[j]) < 30) k->straight = 1;
+    /* a junction the picture may get wrong: many lines, lines close together, or one line wide enough to be two */
+    k->complex = k->ne >= 3;
+    for (int j = 0; j < r.n; j++) if (r.width[j] > COMPLEX_WIDTH_DEG) k->complex = true;
+    for (int j = 0; j + 1 < k->ne; j++) if (fabs(k->rel[j] - k->rel[j + 1]) < 65) k->complex = true;
     printf("S t=%.2f read %d:", hw_us() / 1e6, k->ne);
     for (int j = 0; j < k->ne; j++) printf(" %.0f", k->rel[j]);
     printf("\n");
   }
 #endif
+}
+
+/* Before calling it a dead end: was the line only lost on a curve? Sweep right up to 100°, then left through straight
+ * on to 150°; a line found there continues the one we were on. Returns true (and leaves the bar on it) if found. */
+static bool line_lost_on_curve(void) {
+#if LOST_SWEEP
+  double start = TH;
+  int64_t t0 = hw_us();
+  for (int side = -1; side <= 1; side += 2) {
+    double limit = side < 0 ? 100 : 150;
+    bool was = centre(), left_first = !was;
+    for (;;) {
+      odometry(); sense(); dt_s();
+      hw_motors(-side * SPEED_TURN, side * SPEED_TURN);
+      double turned = (TH - start) * side;
+      bool now = centre();
+      if (!now) left_first = true;
+      if (now && !was && left_first && turned > 15 * PI / 180 * (side < 0 ? 1 : 0)) {
+        double rel = remainder(TH - start, 2 * PI) * 180 / PI;
+        if (fabs(rel) < 150) { hw_motors(0, 0); t_spin += (hw_us() - t0) / 1e6; swath_clear(); swath_odo = -1; printf("line was lost on a curve (%.0f deg)\n", rel); return true; }
+      }
+      was = now;
+      if (turned > limit * PI / 180) break;
+      hw_wait_ms(LOOP_MS);
+    }
+  }
+  hw_motors(0, 0);
+  t_spin += (hw_us() - t0) / 1e6; swath_clear(); swath_odo = -1;
+#endif
+  return false;
 }
 
 /* ------------------------------------------------------------------ turning on the spot */
@@ -345,7 +379,7 @@ static double preference(int node, int dir10) {
     case 0: return r;                                   /* leftmost first */
     case 1: return -r;                                  /* rightmost first */
     case 2: return -abs(r) * 2 + (r > 0 ? 1 : 0);       /* straight, then left */
-    case 3: {                                           /* away from the start */
+    case 3: case 10: {                                  /* away from the start */
       double a = dir10 * PI / 1800, nx = M.node[node].x, ny = M.node[node].y, d = hypot(nx, ny);
       if (d < 1) return r;
       return (cos(a) * nx + sin(a) * ny) / d * 1000 + r * 0.01;
@@ -436,6 +470,10 @@ static int choose(int n) {
     if (v > bp) { bp = v; best = k; }
   }
   if (best >= 0) return best;
+#if ORDER == 10
+  /* no untried branch here: go to the best one elsewhere (far from the start, not too far to drive) */
+  { int k = choose_global(n); if (k >= 0) return k; }
+#endif
 #if FRONTIER
   {
     double cost; int goal;
@@ -629,6 +667,7 @@ static void recover(int want10) {
 }
 
 /* Turn on the spot onto exit k of node n (the axle is over the junction). */
+static int depth = 0;
 static void turn_onto(int n, int k) {
   node_t *p = &M.node[n];
   int r = rel10(p->ex[k].dir);
@@ -636,8 +675,16 @@ static void turn_onto(int n, int k) {
   int dir = r > 0 ? 1 : -1;
   if (abs(r) > 1500) dir = 1; /* turning back: always to the left */
   int got = spin_to(p->ex[k].dir, dir, lines_before(n, k, dir));
-  if (got < 0) recover(p->ex[k].dir);
-  else if (p->ex[k].state == EX_NEW) p->ex[k].dir = (int16_t)got;
+  if (got >= 0) { if (p->ex[k].state == EX_NEW) p->ex[k].dir = (int16_t)got; return; }
+  /* No line at the sensor bar in that direction: the branch ends within the sensor arm's reach (a short stub). It is
+   * a dead end — note it and choose again from where we stand. */
+  if (p->ex[k].state == EX_NEW) { p->ex[k].state = EX_DEAD; map_save(); }
+  printf("stub: branch %d of junction %d ends within reach, choosing again\n", k, n);
+  if (++depth > 3) { recover(p->ex[k].dir); depth--; return; }
+  int k2 = choose(n);
+  if (k2 >= 0 && k2 != k) { cur_exit = k2; if (p->ex[k2].used < 255) p->ex[k2].used++; turn_onto(n, k2); }
+  else recover(p->ex[k].dir);
+  depth--;
 }
 
 static void stop_forever(const char *why) {
@@ -768,7 +815,25 @@ void app_main(void) {
     }
     if (ev == EV_LINE_END) {
       double ex = X + ARM_MM * cos(TH), ey = Y + ARM_MM * sin(TH);
-#if DEAD_SCAN
+#if DEAD_SCAN == 2 && SWATH
+      {
+        /* read the floor picture where the line ended: no line leaving there = a dead end, turn back at once */
+        double back = DEADEND_MM, wx = ex - back * cos(TH), wy = ey - back * sin(TH);
+        swath_reading_t rd;
+        swath_read(wx, wy, TH, SPACING_MM / 2, &rd);
+        if (rd.n > 0) {
+          /* a sharp corner: queue it as a junction and let the normal junction code turn there */
+          crossing_t *k = &q[0];
+          qn = 1; k->jx = rd.cx; k->jy = rd.cy; k->ldir = rd.line_dir; k->ne = 0; k->straight = 0; k->left = k->right = 0; k->odo_end = ODO;
+          for (int j = 0; j < rd.n; j++) k->rel[k->ne++] = rd.deg[j];
+          printf("S t=%.2f line end is a corner: %d lines\n", hw_us() / 1e6, rd.n);
+          det = 0; white_odo = -1;
+          hw_wait_ms(LOOP_MS);
+          continue;
+        }
+      }
+#endif
+#if DEAD_SCAN == 1
       /* drive the axle to where the line ended and look around: a sharp corner continues, a dead end does not */
       double h0 = TH;
       while ((ex - X) * cos(TH) + (ey - Y) * sin(TH) > 0) { odometry(); sense(); steer(SPEED_JUNCTION, dt_s(), false, h0); hw_wait_ms(LOOP_MS); }
@@ -787,6 +852,7 @@ void app_main(void) {
         continue;
       }
 #endif
+      if (line_lost_on_curve()) { det_reset(); th_hold = TH; last_err = 0; continue; }
       mark_dead_here();
       printf("dead end t=%.2f at %.0f,%.0f\n", hw_us() / 1e6, ex, ey);
       dead_len = ODO - depart_odo;
@@ -794,6 +860,23 @@ void app_main(void) {
       { int want = norm10(th10() + 1800); if (spin_to(want, 1, 0) < 0) recover(want); }
       depart_odo = ODO;
       det_reset(); th_hold = TH;
+      if (cur_node > 0) {
+        /* A short dead end: after turning back, the sensor bar may already be past the junction we came from, so it
+         * will not be seen again. Decide there now from the map, then drive the axle onto it. */
+        double jx = M.node[cur_node].x, jy = M.node[cur_node].y;
+        double ahead = (jx - X) * cos(TH) + (jy - Y) * sin(TH);
+        if (ahead > -20 && ahead < ARM_MM - 30 && hypot(jx - X, jy - Y) < ARM_MM) {
+          int k, n = junction_update(jx, jy, ahead, NULL, false, NULL, 0, &k);
+          if (n >= 0 && k >= 0) {
+            cur_node = n; cur_exit = k; depart_odo = ODO + ahead;
+            if (abs(rel10(M.node[n].ex[k].dir)) > 300) {
+              turn_pending = true; pend_n = n; pend_k = k;
+              pend_x = X + ahead * cos(TH); pend_y = Y + ahead * sin(TH);
+            }
+            qn = 0;
+          }
+        }
+      }
       continue;
     }
     if (qn > 0 && q[0].straight >= 0 && q[0].ne >= 0) {
@@ -803,8 +886,8 @@ void app_main(void) {
       qn--;
       double ahead = (c0.jx - X) * cos(TH) + (c0.jy - Y) * sin(TH);
       int k, n;
-#if SCAN_MODE
-      if (map_find(c0.jx, c0.jy, MATCH_MM) < 0) {
+#if SCAN_MODE || SCAN_COMPLEX
+      if ((SCAN_MODE || c0.complex) && map_find(c0.jx, c0.jy, RELOC_MM) < 0) {
         /* a new junction: go to it and look around */
         double h0 = TH;
         while ((c0.jx - X) * cos(TH) + (c0.jy - Y) * sin(TH) > 0) { odometry(); sense(); steer(SPEED_JUNCTION, dt_s(), false, h0); hw_wait_ms(LOOP_MS); }

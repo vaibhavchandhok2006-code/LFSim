@@ -11,6 +11,7 @@
 typedef struct {
   int n;                          /* lines leaving (the incoming line excluded), within ±135° of straight on */
   double deg[SW_MAX_EXITS];       /* their directions, degrees relative to the incoming line, + = left */
+  double width[SW_MAX_EXITS];     /* angular spread of each line's edge cells, degrees (wide = maybe two lines) */
   double cx, cy;                  /* refined junction centre, mm (odometry frame) */
   double line_dir;                /* direction of the incoming line, rad */
   int cells;                      /* connected dark cells (0 = nothing dark at the centre) */

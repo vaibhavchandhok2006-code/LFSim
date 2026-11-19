@@ -34,13 +34,13 @@
 #define SPEED_STEP 0.1           /* each switch level adds this */
 #endif
 #ifndef SPEED_JUNCTION
-#define SPEED_JUNCTION 0.5       /* duty while crossing a junction and creeping to it */
+#define SPEED_JUNCTION 0.35       /* duty while crossing a junction and creeping to it */
 #endif
 #ifndef SPEED_TURN
-#define SPEED_TURN 0.6          /* duty of each wheel while spinning in place */
+#define SPEED_TURN 0.5          /* duty of each wheel while spinning in place */
 #endif
 #ifndef KP
-#define KP 0.025                  /* duty per mm of line error */
+#define KP 0.04                  /* duty per mm of line error */
 #endif
 #ifndef KD
 #define KD 0.0012                /* duty per mm/s of error change */
@@ -71,10 +71,16 @@
 #define SWATH 1                  /* 1: read junctions from the swath picture (angles); 0: left/straight/right pattern */
 #endif
 #ifndef READ_MM
-#define READ_MM 60.0             /* read the picture once the bar is this far past the junction */
+#define READ_MM 80.0             /* read the picture once the bar is this far past the junction */
 #endif
 #ifndef SCAN_MODE
 #define SCAN_MODE 0              /* 0: read branches from the pattern while passing; 1: spin once at each new junction */
+#endif
+#ifndef SCAN_COMPLEX
+#define SCAN_COMPLEX 1           /* 1: look all the way round at a new junction the picture may get wrong */
+#endif
+#ifndef COMPLEX_WIDTH_DEG
+#define COMPLEX_WIDTH_DEG 40.0   /* a line whose edge cells spread wider than this may be two lines */
 #endif
 #ifndef CAPTURE_DEG
 #define CAPTURE_DEG 40.0         /* while turning, a line within this of the target heading is the branch */
@@ -90,6 +96,9 @@
 #endif
 #ifndef DEAD_SCAN
 #define DEAD_SCAN 1              /* at a line end: 1 drive to it and look around (finds sharp corners); 0 turn back at once */
+#endif
+#ifndef LOST_SWEEP
+#define LOST_SWEEP 1             /* before a dead end: sweep right and left for a line lost on a curve */
 #endif
 #ifndef KNOWN_ADD
 #define KNOWN_ADD 0              /* 1: a known junction may gain a branch seen on a later pass (60° from the known ones) */
@@ -135,7 +144,8 @@
 #define ORDER 3                  /* which new branch first: 0 left, 1 right, 2 straight, 3 away from start, 4 random,
                                     5 best untried branch on the whole map (W_FAR), 6 pure left hand, 7 pure right hand,
                                     8 left hand but each line once per direction, then the nearest untried branch,
-                                    9 the same with the right hand */
+                                    9 the same with the right hand, 10 away from start here, else the best untried
+                                    branch on the map (W_FAR) */
 #endif
 #ifndef W_FAR
 #define W_FAR 1.0                /* ORDER 5: mm of driving worth spending per mm further from the start a branch leads */

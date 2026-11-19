@@ -24,7 +24,7 @@
   },
   "motor": {
     "ratedV": 6,
-    "noLoadRpm": 130,
+    "noLoadRpm": 200,
     "stallTorque_kgcm": 0.35,
     "stallCurrent_A": 0.23,
     "gearRatio": 150,

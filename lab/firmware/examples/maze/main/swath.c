@@ -237,8 +237,8 @@ void swath_read(double cx, double cy, double heading, double paint_mm, swath_rea
       if (amax - amin > 30 * PI / 180 && l1 > 3 * fmax(l2, 1e-9) && fabs(wrap_r(ax - c_ang)) < 40 * PI / 180) dir = ax;
     }
     double deg = wrap_r(dir - line_dir) * 180 / PI;
-    if (fabs(deg) <= 135 && out->n < SW_MAX_EXITS) out->deg[out->n++] = deg;
+    if (fabs(deg) <= 135 && out->n < SW_MAX_EXITS) { out->width[out->n] = (amax - amin) * 180 / PI; out->deg[out->n++] = deg; }
   }
   /* leftmost first */
-  for (int i = 0; i < out->n; i++) for (int j = i + 1; j < out->n; j++) if (out->deg[j] > out->deg[i]) { double t = out->deg[i]; out->deg[i] = out->deg[j]; out->deg[j] = t; }
+  for (int i = 0; i < out->n; i++) for (int j = i + 1; j < out->n; j++) if (out->deg[j] > out->deg[i]) { double t = out->deg[i]; out->deg[i] = out->deg[j]; out->deg[j] = t; t = out->width[i]; out->width[i] = out->width[j]; out->width[j] = t; }
 }
