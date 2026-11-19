@@ -569,6 +569,25 @@ static int junction_update(double jx, double jy, double ahead_mm, const crossing
     exit_t *from = &M.node[cur_node].ex[cur_exit];
     if (from->state == EX_NEW || from->state == EX_EDGE) map_link(cur_node, cur_exit, n, arr, (int)(ODO + ahead_mm - depart_odo));
   }
+#if INFER_MM > 0
+  /* edge inference: an untried branch pointing straight at a known junction nearby, which has an untried branch
+   * pointing straight back, is that line — note it without driving it (saves exploring box sides and ladders) */
+  for (int e = 0; e < M.node[n].n; e++) {
+    if (M.node[n].ex[e].state != EX_NEW) continue;
+    for (int m = 1; m < M.count; m++) {
+      if (m == n) continue;
+      double dx = M.node[m].x - M.node[n].x, dy = M.node[m].y - M.node[n].y, d = hypot(dx, dy);
+      if (d > INFER_MM || d < 60) continue;
+      int to10 = norm10((int)lround(atan2(dy, dx) * 1800 / PI));
+      if (abs(angle_diff10(M.node[n].ex[e].dir, to10)) > INFER_DEG * 10) continue;
+      int b = map_exit_near(m, norm10(to10 + 1800), INFER_DEG * 10);
+      if (b < 0 || M.node[m].ex[b].state != EX_NEW) continue;
+      map_link(n, e, m, b, (int)d);
+      printf("inferred %d-%d (%.0f mm)\n", n, m, d);
+      break;
+    }
+  }
+#endif
   map_save();
   *k = choose(n);
   if (*k >= 0 && p->ex[*k].used < 255) p->ex[*k].used++;

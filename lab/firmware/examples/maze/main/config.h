@@ -149,6 +149,12 @@
 #ifndef EXPLORE_MORE
 #define EXPLORE_MORE 0           /* 1: after the finish is found, explore branches that could give a shorter route */
 #endif
+#ifndef INFER_MM
+#define INFER_MM 0               /* edge inference up to this length (0 = off); see main.c */
+#endif
+#ifndef INFER_DEG
+#define INFER_DEG 10             /* both branches must point at each other within this */
+#endif
 #ifndef TURN_COST_MM
 #define TURN_COST_MM 120.0       /* route planning: a turn costs as much as this much straight line */
 #endif

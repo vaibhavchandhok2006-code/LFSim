@@ -47,7 +47,10 @@ browser smoke test passes. Next: reality check against the real robot.
   - [x] Generator v6: squares joined to the maze (all earlier rr-2027 results were invalid)
   - [x] Maze firmware in C (lab/firmware/examples/maze): junctions, odometry map in flash, route planning, start-square guard, strategies
   - [x] Fast native I/O (32× real time); PCNT in the shim; `lab search` (successive halving over config.h values)
-  - [ ] Junction identity: no wrong matches or duplicates over a 10-minute session (now 4–11 wrong matches per run)
+  - [x] Junction pictures (swath, C port); never-stop fallbacks; `lab agent` runner + source guard
+  - [x] Searches 1–2 (48 variants): best 61 % of single runs; held-out sessions 10/24 = 42 %
+  - [ ] Explore with less driving (revisits); arc turns that work; then search again
+  - [ ] Junction identity: fewer wrong matches in long runs
   - [ ] ≥ 95 % finish over full sessions on held-out tracks, then faster
   - [ ] Algorithm agent loop (Claude Code on the laptop) with a sandbox for AI-written code
 - [ ] Phase 4 (optimiser) after Phase 5; 6–8: see the spec

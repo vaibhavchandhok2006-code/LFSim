@@ -45,11 +45,21 @@ for each turn).
 many variants (each value in config.h can be set at build time) and tries them on the tuning tracks: all variants on
 a few tracks, the best third on more, and so on (successive halving).
 
-## Where it stands (19 Nov 2026)
-- Single 590 s exploration runs reach the finish on about 2 of 8 tuning tracks.
-- The main problem: in long runs the robot still sometimes matches a junction to the wrong known one, or makes a
-  second copy of it; its map then stops matching the maze. Fixing junction identity is the next step.
-- The robot is slow (about 0.25 m/s while following): a 4 m maze takes most of a session to explore.
+## Where it stands (19 Nov 2026, evening)
+- **Junction pictures (swath).** Junctions are now read from a small picture of the floor built from every sensor
+  reading (a C port of the website's method): lines leaving with their angles, the junction centre refined.
+- **Search.** Two searches over 48 variants: the best finishes 61 % of single 590 s runs on tuning tracks.
+- **Held-out sessions (the real test):** 10 of 24 finished (42 %), with no dry run. Nearly every failure ran out of
+  time: the robot drives about 0.28 m/s and needs 250–550 s to find the finish on a 4 m maze.
+- **Faster motors alone do not help:** the same firmware with 2× motors and its own search finished 42 % of single
+  runs (control at speed needs work first) — input for the electronics agent.
+- **Tried and kept off:** arc turns (worse as written), edge inference (no clear gain). Both are options in config.h.
+
+## What would close the gap
+1. Explore with less driving: the robot drives ~2× the maze's line length (revisits to reach untried branches).
+2. Faster turns that still land on the right line (arc turns, fixed).
+3. Faster hardware with control redesigned for speed (Phase 6 + Phase 4).
+4. Run the algorithm agent (`npm run lab -- agent`) on a laptop with more cores, many rounds.
 
 ## Try it
 ```

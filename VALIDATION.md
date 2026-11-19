@@ -194,3 +194,5 @@ CSV / PNG / HTML report / GIF (2.0 MB) downloads, dark theme. No page or worker 
 | Search 2 (24 variants: turn/junction/explore speeds, strategies 3/5/8, W_FAR, turn cost, read distance, KP) | improve on the defaults | none did: the defaults stay best at 22/36 = 61 % (lab/firmware/examples/maze/search-2026-11-19b.csv) |
 | **Held-out**: full sessions, no dry run, 24 held-out tracks never used in tuning | ≥ 95 % (goal) | **10/24 = 42 %** (95 % interval about 24–61 %); 13 ran out of time, 1 stuck; finish times 204–565 s |
 | Arc turns (ARC_TURNS=1), 2 tracks | faster than stop-and-spin | worse (spin time 68 → 223 s): kept off, for the agent to fix |
+| What-if: 2× motor speed, own search (24 variants, up to 24 tracks) | more finishes | worse: best 10/24 = 42 % of single runs (finish 243 s mean vs 282 s); best gains at the edge of the range — control must be redesigned for speed |
+| Edge inference (INFER_MM 0 / 300 / 450), 12 tuning tracks | more finishes | 9 / 8 / fewer of 12 — no clear gain, kept off |
