@@ -22,6 +22,7 @@ export interface SearchSpace {
   set: string; part?: Part;
   mode?: 'run' | 'session'; seconds?: number;
   samples?: number; rounds?: number[]; keep?: number; seed?: number; variation?: number;
+  goalSideGpio?: number; // the operator sets this switch high when the finish lies right of the start heading
 }
 
 const NAME = /^[A-Z_][A-Z0-9_]*$/;
@@ -65,6 +66,7 @@ export function loadSpace(file: string) {
     params: s.params, setDir: path.resolve(dir, s.set), part: s.part ?? 'tune', mode, seconds, rounds,
     samples: Math.max(1, Math.min(5000, Math.round(s.samples ?? 40))), keep: Math.max(0.05, Math.min(0.9, s.keep ?? 0.34)),
     seed: s.seed ?? 1, variation: Math.max(0, Math.min(2, Math.round(s.variation ?? 0))),
+    goalSideGpio: typeof s.goalSideGpio === 'number' && Number.isInteger(s.goalSideGpio) && s.goalSideGpio >= 0 && s.goalSideGpio <= 64 ? s.goalSideGpio : undefined,
   };
 }
 export type Space = ReturnType<typeof loadSpace>;
@@ -83,7 +85,10 @@ export function sampleConfigs(sp: Space, n: number): Record<string, number>[] {
   return out;
 }
 
-export interface Ranked { cfg: number; values: Record<string, number>; tried: number; finished: number; rate: number; meanTime: number | null; meanDist: number }
+// score: the mean over tracks of the official time (session) or time to the finish (run), counting a track that was
+// not finished as DNF_S. Lower is better; it rewards finishing first and finishing fast second.
+export const DNF_S = 1200;
+export interface Ranked { cfg: number; values: Record<string, number>; tried: number; finished: number; rate: number; meanTime: number | null; meanDist: number; score: number }
 export function rank(cfgs: Record<string, number>[], results: SearchResult[]): Ranked[] {
   return cfgs.map((values, cfg) => {
     const r = results.filter((x) => x.cfg === cfg);
@@ -91,8 +96,9 @@ export function rank(cfgs: Record<string, number>[], results: SearchResult[]): R
     const times = fin.map((x) => x.time_s ?? 0);
     return { cfg, values, tried: r.length, finished: fin.length, rate: r.length ? fin.length / r.length : 0,
       meanTime: times.length ? +(times.reduce((a, b) => a + b, 0) / times.length).toFixed(1) : null,
-      meanDist: r.length ? +(r.reduce((a, x) => a + x.dist_m, 0) / r.length).toFixed(1) : 0 };
-  }).filter((x) => x.tried > 0).sort((a, b) => b.rate - a.rate || (a.meanTime ?? 1e9) - (b.meanTime ?? 1e9));
+      meanDist: r.length ? +(r.reduce((a, x) => a + x.dist_m, 0) / r.length).toFixed(1) : 0,
+      score: r.length ? +(r.reduce((a, x) => a + (x.finished && x.time_s !== null ? x.time_s : DNF_S), 0) / r.length).toFixed(1) : DNF_S };
+  }).filter((x) => x.tried > 0).sort((a, b) => a.score - b.score || b.rate - a.rate);
 }
 
 async function pool(jobs: SearchJob[], workers: number, onResult: (r: SearchResult) => void): Promise<void> {
@@ -130,7 +136,7 @@ export async function runSearch(sp: Space, outDir: string, o: { workers?: number
     const from = r === 0 ? 0 : Math.min(tracks.length, sp.rounds[r - 1]), to = Math.min(tracks.length, sp.rounds[r]);
     const jobs: SearchJob[] = [];
     for (const cfg of alive) for (const entry of tracks.slice(from, to)) {
-      jobs.push({ id: jobs.length, cfg, exe: exes[cfg], wiring: sp.wiring, robotFile: sp.robot, setDir: sp.setDir, entry, mode: sp.mode, seconds: sp.seconds, variation: sp.variation, operator: sp.operator, plan: sp.plan });
+      jobs.push({ id: jobs.length, cfg, exe: exes[cfg], wiring: sp.wiring, robotFile: sp.robot, setDir: sp.setDir, entry, mode: sp.mode, seconds: sp.seconds, variation: sp.variation, operator: sp.operator, plan: sp.plan, goalSideGpio: sp.goalSideGpio });
     }
     log(`round ${r + 1}: ${alive.length} variants × ${to - from} new tracks = ${jobs.length} ${sp.mode}s\n`);
     await pool(jobs, workers, (res) => {
@@ -147,13 +153,13 @@ export async function runSearch(sp: Space, outDir: string, o: { workers?: number
   return { board, results, minutes: (Date.now() - t0) / 60000 };
 }
 
-const fmt = (x?: Ranked) => x ? `${x.finished}/${x.tried} finished (${(x.rate * 100).toFixed(0)} %), mean time ${x.meanTime ?? '—'} s, ${Object.entries(x.values).map(([k, v]) => `${k}=${v}`).join(' ')}` : '—';
+const fmt = (x?: Ranked) => x ? `score ${x.score} s — ${x.finished}/${x.tried} finished (${(x.rate * 100).toFixed(0)} %), mean time ${x.meanTime ?? '—'} s, ${Object.entries(x.values).map(([k, v]) => `${k}=${v}`).join(' ')}` : '—';
 
 function writeBoard(outDir: string, sp: Space, board: Ranked[]) {
   const keys = Object.keys(sp.params);
-  const csv = ['rank,finished,tried,rate,mean_time_s,mean_dist_m,' + keys.join(','), ...board.map((b, i) => [i + 1, b.finished, b.tried, b.rate.toFixed(3), b.meanTime ?? '', b.meanDist, ...keys.map((k) => b.values[k])].join(','))];
+  const csv = ['rank,score_s,finished,tried,rate,mean_time_s,mean_dist_m,' + keys.join(','), ...board.map((b, i) => [i + 1, b.score, b.finished, b.tried, b.rate.toFixed(3), b.meanTime ?? '', b.meanDist, ...keys.map((k) => b.values[k])].join(','))];
   fs.writeFileSync(path.join(outDir, 'leaderboard.csv'), csv.join('\n') + '\n');
   const best = board[0];
-  if (best) fs.writeFileSync(path.join(outDir, 'best.json'), JSON.stringify({ finished: best.finished, tried: best.tried, rate: best.rate, meanTime_s: best.meanTime, defines: { ...sp.base, ...best.values } }, null, 2));
+  if (best) fs.writeFileSync(path.join(outDir, 'best.json'), JSON.stringify({ score_s: best.score, finished: best.finished, tried: best.tried, rate: best.rate, meanTime_s: best.meanTime, defines: { ...sp.base, ...best.values } }, null, 2));
 }
 export { fmt as formatRanked };

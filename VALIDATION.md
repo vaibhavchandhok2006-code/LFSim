@@ -198,3 +198,7 @@ CSV / PNG / HTML report / GIF (2.0 MB) downloads, dark theme. No page or worker 
 | Edge inference (INFER_MM 0 / 300 / 450), 12 tuning tracks | more finishes | 9 / 8 / fewer of 12 — no clear gain, kept off |
 | Wall-follower divergence (lab/tools/lh_divergence.ts), 12 tracks, left-hand runs | match the ideal route to the finish | first wrong junction after 3–34 matched junctions (of 44–57); classes found and fixed: short stubs, 5-way junctions, short dead ends, lines lost on curves |
 | Held-out sessions after the junction fixes (200 rpm robot, DEAD_SCAN=2) | ≥ 95 % | 10/24 = 42 %; finishes faster (145–165 s for the quickest); all failures out of time |
+| Strategies in sessions (24 tuning tracks, stopped at 110/144): 3/6/11 × encoders on/off | rank | with encoders, map explorer (3) 8/24, mean official 204 s; without encoders 0–1/24 for every strategy (junction pictures and distances need odometry) |
+| Goal bias (owner's idea): finish corner 45° left/right of the start heading (side switch set per track), 8 tuning tracks | finish | pure rule (12) 0/8: circles the first box; + avoid repeats (13) 0/8: pulled into the wrong half; as a tie-break in the explorer (14) see below |
+| Explorer + goal-corner tie-break (14) vs away-from-start (3), 12 tuning tracks, single runs | rank | 14: 8/12, score 591 s; 3: 4/12, score 918 s |
+| Same, **held-out sessions** (24) | rank | 14: 8/24, score 895 s; 3: 7/24, score 941 s — too close to call on 24 tracks; 14 kept as the default |

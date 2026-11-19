@@ -67,5 +67,6 @@
     ],
     "dry_s": 0,
     "giveUp_s": 600
-  }
+  },
+  "goalSideGpio": 2
 }

@@ -94,7 +94,9 @@ static void wheel(int side, double d) {
     last_duty[side] = duty;
   }
 }
-void hw_motors(double left, double right) { wheel(0, left); wheel(1, right); }
+static double cmd[2];
+void hw_motors(double left, double right) { cmd[0] = left; cmd[1] = right; wheel(0, left); wheel(1, right); }
+void hw_commanded(double *left, double *right) { *left = cmd[0]; *right = cmd[1]; }
 
 void hw_encoders(int32_t *left, int32_t *right) {
   for (int k = 0; k < 2; k++) {

@@ -20,10 +20,10 @@ async function measure(spaceFile: string, part: 'tune' | 'held', n: number, outD
   const one = { ...sp, params: {}, rounds: [n], samples: 1, part };
   const r = await runSearch(one, outDir, { workers });
   const b = r.board[0];
-  return { finished: b?.finished ?? 0, tried: b?.tried ?? 0, meanTime: b?.meanTime ?? null };
+  return { finished: b?.finished ?? 0, tried: b?.tried ?? 0, meanTime: b?.meanTime ?? null, score: b?.score ?? 1200 };
 }
-const better = (a: { finished: number; meanTime: number | null }, b: { finished: number; meanTime: number | null }) =>
-  a.finished > b.finished || (a.finished === b.finished && a.finished > 0 && (a.meanTime ?? 1e9) < (b.meanTime ?? 1e9) - 2);
+// Better = a lower competition score (mean official time, not finished = 1200 s), by more than 5 s.
+const better = (a: { score: number }, b: { score: number }) => a.score < b.score - 5;
 
 function git(args: string[]) { return spawnSync('git', args, { encoding: 'utf8' }); }
 
@@ -34,7 +34,7 @@ export async function runAgent(o: AgentOptions): Promise<void> {
   const prompt = fs.readFileSync('lab/agent/ALGORITHM_AGENT.md', 'utf8');
   const claude = o.claude ?? 'claude';
   let best = await measure(o.spaceFile, 'tune', o.tracks, path.join(o.outDir, 'r0'), o.workers);
-  o.log(`round 0 (current version): ${best.finished}/${best.tried} finished, mean ${best.meanTime ?? '—'} s\n`);
+  o.log(`round 0 (current version): score ${best.score} s, ${best.finished}/${best.tried} finished, mean ${best.meanTime ?? '—'} s\n`);
   fs.appendFileSync(state, `- start: ${best.finished}/${best.tried} tuning tracks finished, mean ${best.meanTime ?? '—'} s\n`);
   for (let i = 1; i <= o.rounds; i += 1) {
     const before = git(['stash', 'create']).stdout.trim(); // snapshot, in case the round must be undone
@@ -50,7 +50,7 @@ export async function runAgent(o: AgentOptions): Promise<void> {
     if (r.error) throw new Error(`Could not run Claude Code (${claude}): ${r.error.message}`);
     const sources = fs.readdirSync(FIRMWARE).filter((f) => /\.[ch]$/.test(f)).map((f) => path.join(FIRMWARE, f));
     const unsafe = checkUntrusted(sources);
-    let score = { finished: -1, tried: 0, meanTime: null as number | null };
+    let score = { finished: -1, tried: 0, meanTime: null as number | null, score: 1e9 };
     if (unsafe.length) o.log(`  refused: ${unsafe.join('; ')}\n`);
     else {
       try { score = await measure(o.spaceFile, 'tune', o.tracks, path.join(o.outDir, `r${i}`), o.workers); }

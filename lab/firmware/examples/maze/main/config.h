@@ -13,6 +13,12 @@
 #ifndef ENC_CPR
 #define ENC_CPR 1050             /* encoder counts per wheel revolution */
 #endif
+#ifndef ENCODERS
+#define ENCODERS 1               /* 0: no wheel encoders — travel estimated from motor duty (VMAX_MMPS) */
+#endif
+#ifndef VMAX_MMPS
+#define VMAX_MMPS 450.0          /* estimated wheel speed at full duty, mm/s (200 rpm, 43 mm wheel); measure it */
+#endif
 #ifndef ARM_MM
 #define ARM_MM 117.0             /* sensor bar ahead of the axle */
 #endif
@@ -144,11 +150,22 @@
 
 /* ---- strategy */
 #ifndef ORDER
-#define ORDER 3                  /* which new branch first: 0 left, 1 right, 2 straight, 3 away from start, 4 random,
+#define ORDER 14                 /* which new branch first: 0 left, 1 right, 2 straight, 3 away from start, 4 random,
                                     5 best untried branch on the whole map (W_FAR), 6 pure left hand, 7 pure right hand,
                                     8 left hand but each line once per direction, then the nearest untried branch,
                                     9 the same with the right hand, 10 away from start here, else the best untried
-                                    branch on the map (W_FAR) */
+                                    branch on the map (W_FAR), 11 LSRB (letters, no map), 12 goal bias (your rule),
+                                    13 goal bias + avoid repeating a line at a junction, 14 like 3 but untried
+                                    lines towards the finish corner first (side switch) */
+#endif
+#ifndef GOAL_DEG
+#define GOAL_DEG 45              /* ORDER 12/13: the finish corner lies this far left/right of the start heading */
+#endif
+#ifndef GOAL_SIDE
+#define GOAL_SIDE 0              /* +1 left, -1 right, 0 from switch 2 (GPIO 2: high = right) */
+#endif
+#ifndef REPEAT_PENALTY_DEG
+#define REPEAT_PENALTY_DEG 90    /* ORDER 13: each earlier use of a line counts as this much worse direction */
 #endif
 #ifndef W_FAR
 #define W_FAR 1.0                /* ORDER 5: mm of driving worth spending per mm further from the start a branch leads */

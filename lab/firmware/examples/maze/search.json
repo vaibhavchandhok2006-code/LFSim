@@ -98,5 +98,6 @@
     36
   ],
   "keep": 0.34,
-  "seed": 5
+  "seed": 5,
+  "goalSideGpio": 2
 }

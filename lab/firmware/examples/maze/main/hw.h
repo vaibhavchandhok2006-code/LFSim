@@ -9,6 +9,7 @@
 void hw_init(void);
 void hw_read_raw(int raw[NS]);            /* 12-bit ADC readings */
 void hw_motors(double left, double right); /* duty -1..1 per wheel; + = forward */
+void hw_commanded(double *left, double *right); /* the duties last set */
 void hw_encoders(int32_t *left, int32_t *right); /* running counts (wraps of the 16-bit counter handled) */
 bool hw_button(void);                     /* true while pressed */
 int hw_switches(void);                    /* speed level 0..3 from two switches */

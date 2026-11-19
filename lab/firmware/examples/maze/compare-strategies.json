@@ -1,0 +1,82 @@
+{
+  "schema": "lfsim-lab/search",
+  "version": 1,
+  "sources": [
+    "main/main.c",
+    "main/hw.c",
+    "main/maze_map.c",
+    "main/swath.c"
+  ],
+  "wiring": "main/wiring.json",
+  "robot": "../../../examples/rmi-test-rig.robot.json",
+  "defines": [
+    "CONFIG_FREERTOS_HZ=1000"
+  ],
+  "operator": {
+    "first": {
+      "presses": [
+        {
+          "gpio": 4,
+          "at_s": 0.3
+        },
+        {
+          "gpio": 4,
+          "at_s": 3.8
+        },
+        {
+          "gpio": 4,
+          "at_s": 4.3
+        }
+      ],
+      "sweep": {
+        "from_s": 0.5,
+        "to_s": 3.6
+      }
+    },
+    "each": {
+      "presses": [
+        {
+          "gpio": 4,
+          "at_s": 0.3
+        }
+      ]
+    }
+  },
+  "base": {},
+  "params": {
+    "ORDER": [
+      3,
+      6,
+      11
+    ],
+    "ENCODERS": [
+      1,
+      0
+    ]
+  },
+  "set": "../../../tracksets/rr-2027",
+  "part": "tune",
+  "mode": "session",
+  "seconds": 590,
+  "samples": 6,
+  "rounds": [
+    24
+  ],
+  "keep": 0.34,
+  "seed": 8,
+  "plan": {
+    "explore": {
+      "name": "explore",
+      "settings": {}
+    },
+    "memory": [
+      {
+        "name": "memory",
+        "settings": {}
+      }
+    ],
+    "dry_s": 0,
+    "giveUp_s": 600
+  },
+  "goalSideGpio": 2
+}

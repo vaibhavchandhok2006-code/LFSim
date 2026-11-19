@@ -101,10 +101,23 @@ static void sense(void) {
 }
 
 static void odometry(void) {
+#if ENCODERS
   int32_t l, r;
   hw_encoders(&l, &r);
   double dl = (l - encL0) * MM_PER_COUNT, dr = (r - encR0) * MM_PER_COUNT;
   encL0 = l; encR0 = r;
+#else
+  /* no encoders: estimate each wheel's travel from the duty it was given (a robot without encoders can do no better;
+   * it drifts with battery voltage, load and slip) */
+  static int64_t t_last = 0;
+  int64_t now = hw_us();
+  double dt = t_last ? (now - t_last) / 1e6 : 0;
+  t_last = now;
+  if (dt > 0.05) dt = 0.05;
+  double cl, cr;
+  hw_commanded(&cl, &cr);
+  double dl = cl * VMAX_MMPS * dt, dr = cr * VMAX_MMPS * dt;
+#endif
   double ds = (dl + dr) / 2, dth = (dr - dl) / TRACK_MM;
   X += ds * cos(TH + dth / 2);
   Y += ds * sin(TH + dth / 2);
@@ -290,6 +303,45 @@ static bool line_lost_on_curve(void) {
   return false;
 }
 
+/* ------------------------------------------------------------------ LSRB (ORDER 11): the classic map-free method
+ * Explore by the left-hand rule and write each decision as a letter: L, S, R, or B (turned back at a dead end).
+ * A dead-end detour "x B y" is replaced on the fly by the one turn it amounts to (angles: L 90, S 0, R -90, B 180;
+ * x + 180 + y). At the finish the string is the route without detours; memory runs replay it junction by junction.
+ * Only junctions with a choice (two or more lines on) and dead ends are counted, so it needs no encoders and no map. */
+static struct { uint16_t magic, n; uint8_t done; char s[600]; } lsrb;
+static int replay_i = 0;
+static int letter_deg(char c) { return c == 'L' ? 90 : c == 'R' ? -90 : c == 'B' ? 180 : 0; }
+static char deg_letter(int d) { d = ((d % 360) + 360) % 360; return d == 90 ? 'L' : d == 270 ? 'R' : d == 180 ? 'B' : 'S'; }
+static void lsrb_save(void) {
+  nvs_handle_t h;
+  if (nvs_open("maze", NVS_READWRITE, &h) != ESP_OK) return;
+  nvs_set_blob(h, "lsrb", &lsrb, sizeof lsrb); nvs_commit(h); nvs_close(h);
+}
+static void lsrb_load(void) {
+  nvs_handle_t h; size_t n = sizeof lsrb;
+  memset(&lsrb, 0, sizeof lsrb);
+  if (nvs_open("maze", NVS_READONLY, &h) != ESP_OK) return;
+  if (nvs_get_blob(h, "lsrb", &lsrb, &n) != ESP_OK || n != sizeof lsrb || lsrb.magic != 0x15B) memset(&lsrb, 0, sizeof lsrb);
+  nvs_close(h);
+}
+static void lsrb_push(char c) {
+#if ORDER == 11
+  if (lsrb.done || lsrb.n >= sizeof lsrb.s - 1) return;
+  lsrb.magic = 0x15B;
+  lsrb.s[lsrb.n++] = c;
+  while (lsrb.n >= 3 && lsrb.s[lsrb.n - 2] == 'B') {
+    char x = lsrb.s[lsrb.n - 3], y = lsrb.s[lsrb.n - 1];
+    lsrb.n -= 3;
+    lsrb.s[lsrb.n++] = deg_letter(letter_deg(x) + 180 + letter_deg(y));
+  }
+  lsrb.s[lsrb.n] = 0;
+  lsrb_save();
+#else
+  (void)c;
+#endif
+}
+static char rel_letter(int r10) { return abs(r10) <= 300 ? 'S' : abs(r10) > 1500 ? 'B' : r10 > 0 ? 'L' : 'R'; }
+
 /* ------------------------------------------------------------------ turning on the spot */
 /* Spin (dir +1 = left, CCW) until the branch towards target10 is under the centre sensors: the `skip`-th line after
  * leaving the current one if it lies within COUNT_DEG of the target, or any line within CAPTURE_DEG of the target.
@@ -372,6 +424,16 @@ static double speed_line;
 
 static int rel10(int dir10) { return angle_diff10(dir10, th10()); }
 
+/* Which side of the start heading the finish lies: GOAL_SIDE +1 left, -1 right, 0 = read the second switch
+ * (on = right). Set it before the first run, looking at the mat. */
+static int goal_side(void) {
+#if GOAL_SIDE != 0
+  return GOAL_SIDE > 0 ? 1 : -1;
+#else
+  return (hw_switches() & 2) ? -1 : 1;
+#endif
+}
+
 /* The order in which untried branches are tried (higher = earlier). */
 static double preference(int node, int dir10) {
   int r = rel10(dir10);
@@ -383,6 +445,10 @@ static double preference(int node, int dir10) {
       double a = dir10 * PI / 1800, nx = M.node[node].x, ny = M.node[node].y, d = hypot(nx, ny);
       if (d < 1) return r;
       return (cos(a) * nx + sin(a) * ny) / d * 1000 + r * 0.01;
+    }
+    case 14: {                                          /* towards the finish corner (goal side switch) */
+      int goal10 = goal_side() * GOAL_DEG * 10;
+      return -abs(angle_diff10(dir10, goal10)) + 0.01 * goal_side() * r;
     }
     default: rng = rng * 1103515245u + 12345u; return (double)((rng >> 8) & 0xffff);
   }
@@ -429,6 +495,44 @@ static int choose(int n) {
   }
 #if ORDER == 5
   { int k = choose_global(n); if (k >= 0) return k; }
+#endif
+#if ORDER == 12 || ORDER == 13
+  {
+    /* Goal bias: the finish is in the far corner, GOAL_DEG to the left (+) or right (-) of the start heading (side from
+     * the side switch). Take the line pointing closest to that direction; ties go to the goal side. ORDER 13 also
+     * remembers how often each line was taken here and avoids repeating itself (escapes boxes and pockets). */
+    int side = goal_side();
+    int goal10 = side * GOAL_DEG * 10, best = -1;
+    double bv = 1e18;
+    for (int k = 0; k < p->n; k++) {
+      exit_t *e = &p->ex[k];
+      if (abs(rel10(e->dir)) > 1500 || (e->state == EX_EDGE && e->to == 0)) continue;
+      double v = abs(angle_diff10(e->dir, goal10)) - 0.01 * side * rel10(e->dir);
+#if ORDER == 13
+      if (e->state == EX_DEAD) continue;
+      v += e->used * REPEAT_PENALTY_DEG * 10;
+#endif
+      if (v < bv) { bv = v; best = k; }
+    }
+    if (best >= 0) return best;
+  }
+#endif
+#if ORDER == 11
+  {
+    /* lines on from here (not back), and whether this junction counts (a choice) */
+    int on[MAX_EXITS], non = 0;
+    for (int k = 0; k < p->n; k++) if (abs(rel10(p->ex[k].dir)) <= 1500 && p->ex[k].state != EX_DEAD && !(p->ex[k].state == EX_EDGE && p->ex[k].to == 0)) on[non++] = k;
+    if (lsrb.done && non >= 2 && replay_i < lsrb.n) {
+      /* memory run: the next letter */
+      int want = letter_deg(lsrb.s[replay_i++]) * 10, best = -1, bd = 99999;
+      for (int i = 0; i < non; i++) { int d = abs(angle_diff10(rel10(p->ex[on[i]].dir), want)); if (d < bd) { bd = d; best = on[i]; } }
+      if (best >= 0) return best;
+    }
+    if (non == 1) return on[0];
+    int best = -1, bp = -99999;
+    for (int i = 0; i < non; i++) { int r = rel10(p->ex[on[i]].dir); if (r > bp) { bp = r; best = on[i]; } }
+    if (best >= 0) { if (!lsrb.done && non >= 2) lsrb_push(rel_letter(rel10(p->ex[best].dir))); return best; }
+  }
 #endif
 #if ORDER == 8 || ORDER == 9
   /* wall following that cannot loop: the first line on that side not yet driven out of this junction */
@@ -684,6 +788,9 @@ static void turn_onto(int n, int k) {
    * a dead end — note it and choose again from where we stand. */
   if (p->ex[k].state == EX_NEW) { p->ex[k].state = EX_DEAD; map_save(); }
   printf("stub: branch %d of junction %d ends within reach, choosing again\n", k, n);
+#if ORDER == 11
+  if (!lsrb.done && lsrb.n > 0) { lsrb.n--; lsrb.s[lsrb.n] = 0; } /* the stub was not a real choice */
+#endif
   if (++depth > 3) { recover(p->ex[k].dir); depth--; return; }
   int k2 = choose(n);
   if (k2 >= 0 && k2 != k) { cur_exit = k2; if (p->ex[k2].used < 255) p->ex[k2].used++; turn_onto(n, k2); }
@@ -711,13 +818,27 @@ void app_main(void) {
   if (!cal_load()) { wait_press(); calibrate(); }
   if (!map_load()) map_reset();
   M.runs++;
+  lsrb_load();
+  if (!lsrb.done) { lsrb.n = 0; lsrb.s[0] = 0; } /* an unfinished exploration starts again from the start square */
+  replay_i = 0;
   mode_route = M.finish_node != 255;
+#if ORDER == 11
+  mode_route = false; /* LSRB replays its letters itself (choose) */
+  if (lsrb.done) speed_line = 0; /* set below */
+#endif
 #if EXPLORE_MORE
   if (mode_route && hw_switches() == 0) {
     for (int i = 1; i < M.count && mode_route; i++) if (map_has_new(i)) mode_route = false;
   }
 #endif
-  speed_line = mode_route ? SPEED_MEMORY0 + hw_switches() * SPEED_STEP : SPEED_EXPLORE;
+  int level = hw_switches();
+#if (ORDER == 12 || ORDER == 13 || ORDER == 14) && GOAL_SIDE == 0
+  level &= 1; /* switch 2 tells the finish side */
+#endif
+  speed_line = mode_route ? SPEED_MEMORY0 + level * SPEED_STEP : SPEED_EXPLORE;
+#if ORDER == 11
+  if (lsrb.done) speed_line = SPEED_MEMORY0 + level * SPEED_STEP;
+#endif
   printf("run %d: %s, %d junctions known, speed %.2f\n", M.runs, mode_route ? "route" : "explore", M.count - 1, speed_line);
   map_save();
   wait_press();
@@ -756,6 +877,9 @@ void app_main(void) {
         M.finish_node = (uint8_t)cur_node; M.finish_exit = (uint8_t)cur_exit;
         map_save();
       }
+#if ORDER == 11
+      if (!lsrb.done) { lsrb.done = 1; lsrb.magic = 0x15B; lsrb_save(); printf("route: %s\n", lsrb.s); }
+#endif
       double until = ODO + 60; /* roll fully into the square, then stop */
       while (ODO < until) { odometry(); sense(); steer(SPEED_JUNCTION, dt_s(), false, TH); hw_wait_ms(LOOP_MS); }
       stop_forever("finish");
@@ -858,6 +982,7 @@ void app_main(void) {
 #endif
       if (line_lost_on_curve()) { det_reset(); th_hold = TH; last_err = 0; continue; }
       mark_dead_here();
+      if (!lsrb.done) lsrb_push('B');
       printf("dead end t=%.2f at %.0f,%.0f\n", hw_us() / 1e6, ex, ey);
       dead_len = ODO - depart_odo;
       on_dead = true;

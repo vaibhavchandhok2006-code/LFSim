@@ -14,6 +14,15 @@ export interface SearchJob {
   id: number; cfg: number; exe: string; wiring: Wiring; robotFile: string;
   setDir: string; entry: SetEntry; mode: 'run' | 'session'; seconds: number; variation: number;
   operator: { first?: OperatorScript; each: OperatorScript }; plan: SessionPlan; competition?: string;
+  goalSideGpio?: number; // the operator sets this switch high when the finish lies right of the start heading
+}
+
+// Which side of the start heading the finish square lies (image frame: x right, y down), as the team sees on the mat.
+export function finishOnRight(track: { startPose: { x: number; y: number; theta: number }; finish: { x0: number; y0: number; x1: number; y1: number } | null; res: number }): boolean {
+  if (!track.finish) return false;
+  const fx = ((track.finish.x0 + track.finish.x1) / 2) * track.res, fy = ((track.finish.y0 + track.finish.y1) / 2) * track.res;
+  const p = track.startPose, dx = fx - p.x, dy = fy - p.y;
+  return Math.cos(p.theta) * dy - Math.sin(p.theta) * dx > 0;
 }
 export interface SearchResult {
   id: number; cfg: number; track: string; finished: boolean;
@@ -33,13 +42,19 @@ function robot(file: string): RobotProfile {
   return r;
 }
 
-export async function runSearchJob(j: SearchJob): Promise<SearchResult> {
+export async function runSearchJob(job: SearchJob): Promise<SearchResult> {
+  let j = job;
   const t0 = Date.now();
   const base = { id: j.id, cfg: j.cfg, track: j.entry.id };
   try {
     const profile = robot(j.robotFile);
     const track = loadSetTrack(j.setDir, j.entry, profile.axleFromFront_mm);
     const seed = (j.entry.seed % 1_000_000_007) * 7 + j.variation * 101 + 1;
+    if (j.goalSideGpio !== undefined) {
+      const lv = { gpio: j.goalSideGpio, level: (finishOnRight(track) ? 1 : 0) as 0 | 1 };
+      const add = (sc?: OperatorScript) => sc && { ...sc, levels: [...(sc.levels ?? []), lv] };
+      j = { ...j, operator: { ...(j.operator.first ? { first: add(j.operator.first) } : {}), each: add(j.operator.each)! } };
+    }
     const disturbances = disturbancesFor(VARIATIONS[j.variation], seed);
     if (j.mode === 'session') {
       const r = await runSession({
