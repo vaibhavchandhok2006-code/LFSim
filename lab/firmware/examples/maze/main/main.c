@@ -281,6 +281,8 @@ static int scan_(int out10[MAX_EXITS]) {
 static int cur_node = 0, cur_exit = 0;     /* where we left from */
 static double depart_odo = 0;
 static bool on_dead = false;               /* travelling back from a dead end along cur_exit */
+static double dead_len = 0;                /* how far the dead end was from the junction, mm */
+static double g_ahead = 0;                 /* the junction being located is this far ahead of the axle */
 static bool mode_route = false;            /* memory run: drive the shortest known route */
 static double speed_line;
 
@@ -414,13 +416,25 @@ static int locate(double jx, double jy, int h, int left, int right, int straight
     if (on_dead) expect = cur_node;
     else if (e->state == EX_EDGE && e->to != 0) expect = e->to;
   }
-  if (expect >= 0 && hypot(M.node[expect].x - jx, M.node[expect].y - jy) < EXPECT_MM) return expect;
+  if (expect >= 0 && hypot(M.node[expect].x - jx, M.node[expect].y - jy) < EXPECT_MM) {
+    /* the distance driven must fit the known length of the line, or this is some other junction */
+    double driven = ODO + g_ahead - depart_odo;
+    double want = on_dead ? dead_len : M.node[cur_node].ex[cur_exit].len_mm;
+    if (fabs(driven - want) < LEN_TOL_MM + 0.15 * want) return expect;
+    printf("not the expected junction: drove %.0f mm, line is %.0f mm\n", driven, want);
+  }
   /* by place and shape: a known junction nearby with a line back towards us and the branches the bar just saw */
   int back = norm10(h + 1800), best = -1;
-  double bs = 1e18;
+  double bs = 1e18, driven = ODO + g_ahead - depart_odo;
   for (int i = 1; i < M.count; i++) {
     double d = hypot(M.node[i].x - jx, M.node[i].y - jy);
     if (d >= RELOC_MM) continue;
+    /* we cannot have reached it yet: back at the junction just left needs a loop; any other needs at least the
+     * straight-line distance */
+    if (!on_dead && cur_node > 0) {
+      double need = i == cur_node ? 300 : hypot(M.node[i].x - M.node[cur_node].x, M.node[i].y - M.node[cur_node].y) - 60;
+      if (driven < need) continue;
+    }
     int a = map_exit_near(i, back, 450);
     if (a < 0) continue;
     double score = d;
@@ -432,18 +446,39 @@ static int locate(double jx, double jy, int h, int left, int right, int straight
     if (score < bs) { bs = score; best = i; }
   }
   if (best >= 0 && bs < RELOC_MM) return best;
-  return map_find(jx, jy, MATCH_MM);
+  int f = map_find(jx, jy, MATCH_MM);
+  if (f >= 0 && f == cur_node && !on_dead && driven < 300) f = -1;
+  return f;
 }
 
 /* A junction at (jx, jy), `ahead_mm` in front of the axle: update the map and choose the way on. Returns the node and
  * sets *k to the exit to take (-1: no way on). The pose is corrected if the junction is already known. */
 static int junction_update(double jx, double jy, double ahead_mm, int left, int right, int straight, bool scanned, const int *dirs, int ndirs, int *k) {
   int h = th10();
+  g_ahead = ahead_mm;
   int n = locate(jx, jy, h, scanned ? -1 : left, right, straight);
   bool fresh = n < 0;
   if (fresh) { n = map_add_node(jx, jy); if (n < 0) { *k = -1; return -1; } }
   else {
-    /* back at a known junction: correct the position, and the heading from the line we arrived by */
+    /* Back at a known junction. Heading: the journey measured from the junction we left should point exactly at
+     * this one; the angle between the two is the heading error (any line shape). Then correct the position. */
+#if HEAD_GAIN_PCT > 0
+    if (cur_node > 0 && cur_node != n && !on_dead) {
+      double mx = M.node[n].x - M.node[cur_node].x, my = M.node[n].y - M.node[cur_node].y;
+      double ox = jx - M.node[cur_node].x, oy = jy - M.node[cur_node].y;
+      if (hypot(mx, my) > 150 && hypot(ox, oy) > 150) {
+        double err = atan2(mx * oy - my * ox, mx * ox + my * oy); /* measured minus map */
+        if (fabs(err) < 25 * PI / 180) {
+          double c = -err * HEAD_GAIN_PCT / 100.0;
+          TH += c;
+          /* the bar's view of the junction was also rotated: rotate the measured point about the departure node */
+          double rx = M.node[cur_node].x + ox * cos(c) - oy * sin(c), ry = M.node[cur_node].y + ox * sin(c) + oy * cos(c);
+          X += rx - jx; Y += ry - jy; jx = rx; jy = ry;
+          h = th10();
+        }
+      }
+    }
+#endif
     X += M.node[n].x - jx; Y += M.node[n].y - jy;
     int a = map_exit_near(n, norm10(h + 1800), 450);
     if (a >= 0) {
@@ -456,7 +491,7 @@ static int junction_update(double jx, double jy, double ahead_mm, int left, int 
   int back = norm10(h + 1800);
   int arr = map_exit_near(n, back, 450);
   if (arr < 0) arr = map_add_exit(n, back);
-  if (scanned) {
+  if (scanned && fresh) {
     for (int i = 0; i < ndirs; i++) if (abs(angle_diff10(dirs[i], back)) > 300 && map_exit_near(n, dirs[i], 300) < 0) map_add_exit(n, dirs[i]);
   } else if (fresh || (KNOWN_ADD && p->n < 5)) {
     int tol = fresh ? 450 : 600, cand[3], nc = 0;
@@ -473,7 +508,7 @@ static int junction_update(double jx, double jy, double ahead_mm, int left, int 
   map_save();
   *k = choose(n);
   if (*k >= 0 && p->ex[*k].used < 255) p->ex[*k].used++;
-  printf("J t=%.2f n=%d %s at %d,%d h=%d exits=%d -> %d\n", hw_us() / 1e6, n, fresh ? "new" : "known", p->x, p->y, h / 10, p->n, *k);
+  printf("J t=%.2f n=%d %s at %d,%d h=%d exits=%d -> %d pose=%.0f,%.0f,%.1f ahead=%.0f\n", hw_us() / 1e6, n, fresh ? "new" : "known", p->x, p->y, h / 10, p->n, *k, X, Y, TH * 180 / PI, ahead_mm);
   return n;
 }
 
@@ -621,8 +656,10 @@ void app_main(void) {
 #endif
       mark_dead_here();
       printf("dead end t=%.2f at %.0f,%.0f\n", hw_us() / 1e6, ex, ey);
+      dead_len = ODO - depart_odo;
       on_dead = true;
       { int want = norm10(th10() + 1800); if (spin_to(want, 1, 0) < 0) recover(want); }
+      depart_odo = ODO;
       det_reset(); th_hold = TH;
       continue;
     }

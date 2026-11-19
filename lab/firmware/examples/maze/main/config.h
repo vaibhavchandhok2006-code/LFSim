@@ -90,11 +90,17 @@
 #ifndef EXPECT_MM
 #define EXPECT_MM 250.0          /* on a known line, the junction at its end is accepted within this distance */
 #endif
+#ifndef LEN_TOL_MM
+#define LEN_TOL_MM 60.0          /* a known line's junction must come after its length ± this (+15 %) */
+#endif
 #ifndef RELOC_MM
 #define RELOC_MM 150.0           /* a known junction this close with a matching shape is the same junction */
 #endif
 #ifndef HEAD_FIX_DEG
 #define HEAD_FIX_DEG 0.0         /* at a known junction, correct the heading from the arrival line if within this (0 = off) */
+#endif
+#ifndef HEAD_GAIN_PCT
+#define HEAD_GAIN_PCT 70         /* heading correction from junction-to-junction journeys, % of the measured error */
 #endif
 #ifndef SNAP
 #define SNAP 1                   /* 1: straighten the heading to the mat's axes while on a straight line */

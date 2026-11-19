@@ -43,7 +43,14 @@ browser smoke test passes. Next: reality check against the real robot.
 - [ ] Later in Phase 2 scope: Arduino .ino (C++ shim); PCNT,
       extra FreeRTOS tasks; a sandbox for AI-written native code (before Phase 5)
 - [ ] Phase 3 (calibration): waiting for a working robot
-- [ ] Phase 5 (algorithm agent) next, then Phase 4; 6–8: see the spec
+- [ ] Phase 5 (algorithm agent) — in progress
+  - [x] Generator v6: squares joined to the maze (all earlier rr-2027 results were invalid)
+  - [x] Maze firmware in C (lab/firmware/examples/maze): junctions, odometry map in flash, route planning, start-square guard, strategies
+  - [x] Fast native I/O (32× real time); PCNT in the shim; `lab search` (successive halving over config.h values)
+  - [ ] Junction identity: no wrong matches or duplicates over a 10-minute session (now 4–11 wrong matches per run)
+  - [ ] ≥ 95 % finish over full sessions on held-out tracks, then faster
+  - [ ] Algorithm agent loop (Claude Code on the laptop) with a sandbox for AI-written code
+- [ ] Phase 4 (optimiser) after Phase 5; 6–8: see the spec
 - Findings for later phases: the current robot with LSRB / Trémaux often drives back into the start square (aborts
   the run) and explores slowly on dense mazes — work for the algorithm agent (Phase 5)
 

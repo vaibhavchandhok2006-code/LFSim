@@ -180,3 +180,11 @@ CSV / PNG / HTML report / GIF (2.0 MB) downloads, dark theme. No page or worker 
 | Flash (NVS) keeps i32, blob and string values between runs; wrong type and over-long names are refused; switch levels read back | as on the chip | pass (test) |
 | A session with native firmware: each run a reset, flash counts the resets, plan stays on explore until a finish | pass | pass (test, 22 runs) |
 | RMI firmware, whole sessions, 6 held-out stage-1 tracks | runs without errors | 6 sessions in 52 s; 0 finishes; 122 of 124 runs leave the mat (plain line follower, no maze logic) |
+
+## Phase 5 (in progress) — 2026-11-19
+| Check | Expected | Result |
+| --- | --- | --- |
+| Generated tracks: a line touches the start and the finish square | all | v5: 0 of 500 (bug); v6: 500 of 500 |
+| Fast native I/O vs exact mode, same 60 s run | same behaviour | same junctions and positions within ~2 cm (sensor noise drawn per tick); 3–6.5× faster |
+| Maze firmware, single 590 s runs, left-hand loop-proof strategy, 8 tuning tracks | finish | 2 of 8 (estimate of current state; not yet a benchmark) |
+| Junction identity over a 590 s run | 0 wrong matches | 4–11 wrong matches (lab/tools/junction_matches.py) — open |
