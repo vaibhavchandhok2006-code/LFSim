@@ -267,7 +267,7 @@ static bool line_lost_on_curve(void) {
   double start = TH;
   int64_t t0 = hw_us();
   for (int side = -1; side <= 1; side += 2) {
-    double limit = side < 0 ? 100 : 150;
+    double limit = 100;
     bool was = centre(), left_first = !was;
     for (;;) {
       odometry(); sense(); dt_s();
@@ -277,7 +277,7 @@ static bool line_lost_on_curve(void) {
       if (!now) left_first = true;
       if (now && !was && left_first && turned > 15 * PI / 180 * (side < 0 ? 1 : 0)) {
         double rel = remainder(TH - start, 2 * PI) * 180 / PI;
-        if (fabs(rel) < 150) { hw_motors(0, 0); t_spin += (hw_us() - t0) / 1e6; swath_clear(); swath_odo = -1; printf("line was lost on a curve (%.0f deg)\n", rel); return true; }
+        if (fabs(rel) < LOST_MAX_DEG) { hw_motors(0, 0); t_spin += (hw_us() - t0) / 1e6; swath_clear(); swath_odo = -1; printf("line was lost on a curve (%.0f deg)\n", rel); return true; }
       }
       was = now;
       if (turned > limit * PI / 180) break;
@@ -512,7 +512,7 @@ static int locate(double jx, double jy, int h, const int *obs, int nobs) {
     /* the distance driven must fit the known length of the line, or this is some other junction */
     double driven = ODO + g_ahead - depart_odo;
     double want = on_dead ? dead_len : M.node[cur_node].ex[cur_exit].len_mm;
-    if (fabs(driven - want) < LEN_TOL_MM + 0.15 * want) return expect;
+    if (fabs(driven - want) < LEN_TOL_MM + 0.15 * want) { printf("match: expected %d\n", expect); return expect; }
     printf("not the expected junction: drove %.0f mm, line is %.0f mm\n", driven, want);
   }
   /* by place and shape: a known junction nearby with a line back towards us and the branches the bar just saw */
@@ -543,7 +543,9 @@ static int locate(double jx, double jy, int h, const int *obs, int nobs) {
     }
     if (score < bs) { bs = score; best = i; }
   }
-  if (best >= 0 && bs < RELOC_MM) return best;
+  if (best >= 0 && bs < RELOC_MM) { printf("match: shape %d (score %.0f)\n", best, bs); return best; }
+  /* last resort, by place alone — only when there is no reading of the junction's shape to go by */
+  if (nobs >= 0) return -1;
   int f = map_find(jx, jy, MATCH_MM);
   if (f >= 0 && f == cur_node && !on_dead && driven < 300) f = -1;
   return f;
@@ -629,7 +631,9 @@ static int junction_update(double jx, double jy, double ahead_mm, const crossing
   map_save();
   *k = choose(n);
   if (*k >= 0 && p->ex[*k].used < 255) p->ex[*k].used++;
-  printf("J t=%.2f n=%d %s at %d,%d h=%d exits=%d -> %d pose=%.0f,%.0f,%.1f ahead=%.0f\n", hw_us() / 1e6, n, fresh ? "new" : "known", p->x, p->y, h / 10, p->n, *k, X, Y, TH * 180 / PI, ahead_mm);
+  printf("J t=%.2f n=%d %s at %d,%d h=%d exits=%d -> %d pose=%.0f,%.0f,%.1f ahead=%.0f ex=", hw_us() / 1e6, n, fresh ? "new" : "known", p->x, p->y, h / 10, p->n, *k, X, Y, TH * 180 / PI, ahead_mm);
+  for (int e = 0; e < p->n; e++) printf("%s%d%c", e ? "," : "", rel10(p->ex[e].dir) / 10, "NEDF"[p->ex[e].state]);
+  printf("\n");
   return n;
 }
 

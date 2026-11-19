@@ -100,6 +100,9 @@
 #ifndef LOST_SWEEP
 #define LOST_SWEEP 1             /* before a dead end: sweep right and left for a line lost on a curve */
 #endif
+#ifndef LOST_MAX_DEG
+#define LOST_MAX_DEG 90.0        /* a curve continues within this of straight on; beyond is the line behind */
+#endif
 #ifndef KNOWN_ADD
 #define KNOWN_ADD 0              /* 1: a known junction may gain a branch seen on a later pass (60° from the known ones) */
 #endif
