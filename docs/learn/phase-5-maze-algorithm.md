@@ -64,6 +64,16 @@ a last-resort match that ignored the junction's shape. The robot now follows the
 ~50 junctions before its first mistake. With ~50 junctions per maze, reliability must reach ~99.9 % per junction.
 The robot file now uses 200 rpm motors (the listing); held-out sessions: 10/24, quicker finishes.
 
+## Every known algorithm, tested (19 Nov)
+From the literature on line mazes and unknown-maze exploration: random mouse, wall followers, LSRB (Vannoy; arXiv
+1410.4145), Trémaux / Tarry, the encoder map + Dijkstra method (arXiv 1410.4145; also how a Shaastra 2017 winner
+describes theirs: explore, then the shortest path), breadth-first, Pledge, and micromouse-style flood fill / A*
+towards an assumed goal. All are in the firmware (`ORDER` in config.h) and were run on the same tracks.
+**Best: the map explorer with a finish-corner tie-break** (untried lines first, and among them the one pointing most
+towards the finish corner; the side is set with a switch): 45 % of 60 single runs, against 38 % for the next best.
+Pure wall following and LSRB fail here: one misread junction traps them in a loop. Pledge and A* towards the corner
+are pulled into regions the real route leaves first.
+
 ## What would close the gap
 1. Explore with less driving: the robot drives ~2× the maze's line length (revisits to reach untried branches).
 2. Faster turns that still land on the right line (arc turns, fixed).

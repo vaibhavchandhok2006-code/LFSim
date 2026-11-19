@@ -156,7 +156,8 @@
                                     9 the same with the right hand, 10 away from start here, else the best untried
                                     branch on the map (W_FAR), 11 LSRB (letters, no map), 12 goal bias (your rule),
                                     13 goal bias + avoid repeating a line at a junction, 14 like 3 but untried
-                                    lines towards the finish corner first (side switch) */
+                                    lines towards the finish corner first (side switch), 15 Pledge algorithm towards
+                                    the corner, 16 goal-directed frontier (A*-like, GOAL_DIST_MM) */
 #endif
 #ifndef GOAL_DEG
 #define GOAL_DEG 45              /* ORDER 12/13: the finish corner lies this far left/right of the start heading */
@@ -166,6 +167,12 @@
 #endif
 #ifndef REPEAT_PENALTY_DEG
 #define REPEAT_PENALTY_DEG 90    /* ORDER 13: each earlier use of a line counts as this much worse direction */
+#endif
+#ifndef GOAL_DIST_MM
+#define GOAL_DIST_MM 4500        /* ORDER 16: assumed distance to the finish corner (4 m mat, corner to corner ≈ 4.9 m) */
+#endif
+#ifndef W_GOAL
+#define W_GOAL 1.0               /* ORDER 16: weight of the remaining straight distance to the corner vs driving */
 #endif
 #ifndef W_FAR
 #define W_FAR 1.0                /* ORDER 5: mm of driving worth spending per mm further from the start a branch leads */

@@ -486,6 +486,9 @@ static int choose_global(int n) {
   return bk;
 }
 
+static bool pledge_follow = false;
+static int pledge_sum = 0;
+
 static int choose(int n) {
   node_t *p = &M.node[n];
   if (mode_route) {
@@ -515,6 +518,61 @@ static int choose(int n) {
       if (v < bv) { bv = v; best = k; }
     }
     if (best >= 0) return best;
+  }
+#endif
+#if ORDER == 15
+  {
+    /* Pledge algorithm (with a gyro / heading): head in the preferred direction (towards the finish corner); when that
+     * is not possible, follow the wall on one side, adding up every turn; leave the wall only when the sum is back to
+     * zero (facing the preferred direction again). The counter is what lets it walk out of boxes and spirals. */
+    int goal10 = goal_side() * GOAL_DEG * 10, best = -1;
+    if (!pledge_follow) {
+      /* free: a line within 45° of the preferred direction? take the nearest */
+      int bd = 99999;
+      for (int k = 0; k < p->n; k++) {
+        exit_t *e = &p->ex[k];
+        if (abs(rel10(e->dir)) > 1500 || (e->state == EX_EDGE && e->to == 0)) continue;
+        int d = abs(angle_diff10(e->dir, goal10));
+        if (d < bd) { bd = d; best = k; }
+      }
+      if (best >= 0 && bd <= 450) return best;
+      pledge_follow = true; pledge_sum = 0; /* blocked: start following the wall */
+    }
+    /* following: the wall on the goal side's opposite hand keeps the preferred direction on the other side */
+    int hand = -goal_side(), bp = -99999;
+    best = -1;
+    for (int k = 0; k < p->n; k++) {
+      exit_t *e = &p->ex[k];
+      if (e->state == EX_EDGE && e->to == 0) continue;
+      int r = rel10(e->dir), v = abs(r) > 1500 ? -99999 + 1 : hand * r;
+      if (v > bp) { bp = v; best = k; }
+    }
+    if (best >= 0) {
+      pledge_sum += rel10(p->ex[best].dir);
+      if (abs(pledge_sum) < 300 && abs(angle_diff10(p->ex[best].dir, goal10)) <= 450) pledge_follow = false;
+      return best;
+    }
+  }
+#endif
+#if ORDER == 16
+  {
+    /* Goal-directed frontier search (like micromouse modified flood fill / A*): the finish is assumed in the far
+     * corner, GOAL_DIST_MM away in the GOAL_DEG direction. Every untried line on the map is valued by the driving to
+     * reach it plus the straight distance from where it leads to that corner; take the cheapest. */
+    map_costs(n, th10(), TURN_COST_MM, g_cost, g_first);
+    double gx = GOAL_DIST_MM * cos(goal_side() * GOAL_DEG * PI / 180), gy = GOAL_DIST_MM * sin(goal_side() * GOAL_DEG * PI / 180);
+    double bv = 1e18; int bk = -1;
+    for (int i = 1; i < M.count; i++) {
+      if (!isfinite(g_cost[i])) continue;
+      node_t *q2 = &M.node[i];
+      for (int k = 0; k < q2->n; k++) {
+        if (q2->ex[k].state != EX_NEW) continue;
+        double a = q2->ex[k].dir * PI / 1800, ex = q2->x + 250 * cos(a), ey = q2->y + 250 * sin(a);
+        double v = g_cost[i] + W_GOAL * hypot(gx - ex, gy - ey) + (i == n && abs(rel10(q2->ex[k].dir)) > 300 ? TURN_COST_MM : 0);
+        if (v < bv) { bv = v; bk = i == n ? k : g_first[i]; }
+      }
+    }
+    if (bk >= 0) return bk;
   }
 #endif
 #if ORDER == 11
@@ -832,7 +890,7 @@ void app_main(void) {
   }
 #endif
   int level = hw_switches();
-#if (ORDER == 12 || ORDER == 13 || ORDER == 14) && GOAL_SIDE == 0
+#if (ORDER >= 12 && ORDER <= 16) && GOAL_SIDE == 0
   level &= 1; /* switch 2 tells the finish side */
 #endif
   speed_line = mode_route ? SPEED_MEMORY0 + level * SPEED_STEP : SPEED_EXPLORE;
@@ -983,6 +1041,7 @@ void app_main(void) {
       if (line_lost_on_curve()) { det_reset(); th_hold = TH; last_err = 0; continue; }
       mark_dead_here();
       if (!lsrb.done) lsrb_push('B');
+      if (pledge_follow) pledge_sum += 1800; /* Pledge: turning back counts as a half turn */
       printf("dead end t=%.2f at %.0f,%.0f\n", hw_us() / 1e6, ex, ey);
       dead_len = ODO - depart_odo;
       on_dead = true;
