@@ -16,7 +16,7 @@ const D = new URL('../firmware/examples/maze/main/', import.meta.url).pathname;
 const SET = new URL('../tracksets/rr-2027', import.meta.url).pathname;
 const exe = buildFirmware([D + 'main.c', D + 'hw.c', D + 'maze_map.c', D + 'swath.c'], { defines: ['CONFIG_FREERTOS_HZ=1000', ...defs.split(',').filter(Boolean)] }).exe;
 const wiring = parseWiring(fs.readFileSync(D + 'wiring.json', 'utf8'));
-const { start } = loadInputs({ track: 'public/samples/roborun-sample.png', robot: 'lab/examples/rmi-test-rig.robot.json' });
+const { start } = loadInputs({ track: 'public/samples/roborun-sample.png', robot: process.env.ROBOT ?? 'lab/examples/rmi-test-rig.robot.json' });
 const m = loadTrackSet(SET);
 const first = { presses: [{ gpio: 4, at_s: 0.3 }, { gpio: 4, at_s: 3.8 }, { gpio: 4, at_s: 4.3 }], sweep: { from_s: 0.5, to_s: 3.6 } };
 const each = { presses: [{ gpio: 4, at_s: 0.3 }] };
@@ -45,7 +45,7 @@ for (const id of ids.split(',')) {
     summary.push({ id, end, t: +s.time.toFixed(1), dist: +s.distance.toFixed(1), wall: Date.now() - t0 });
   } else {
     const slog: string[] = [];
-    const r = await runSession({ competition: loadCompetition(), seed: entry.seed, plan: { explore: { name: 'explore', settings: {} }, memory: [{ name: 'm0', settings: {} }, { name: 'm1', settings: {}, levels: [{ gpio: 21, level: 1 }] }], dry_s: 300, giveUp_s: Number(process.env.GIVEUP ?? 600) },
+    const r = await runSession({ competition: loadCompetition(), seed: entry.seed, plan: { explore: { name: 'explore', settings: {} }, memory: [{ name: 'm0', settings: {} }, { name: 'm1', settings: {}, levels: [{ gpio: 21, level: 1 }] }], dry_s: Number(process.env.DRY ?? 300), giveUp_s: Number(process.env.GIVEUP ?? 600) },
       checkpoints: entry.checkpoints, base: { ...start, track, flags: ALL_ON, memory: {}, disturbances: disturbancesFor(VARIATIONS[0], entry.seed) },
       firmware: { exe, wiring, operator: { first, each } }, onConsole: (k, t, x) => slog.push(`${k} ${t.toFixed(2)} ${x}`) });
     fs.writeFileSync(`${out}/${id}.session.txt`, slog.join('\n'));

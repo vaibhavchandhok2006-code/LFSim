@@ -188,3 +188,6 @@ CSV / PNG / HTML report / GIF (2.0 MB) downloads, dark theme. No page or worker 
 | Fast native I/O vs exact mode, same 60 s run | same behaviour | same junctions and positions within ~2 cm (sensor noise drawn per tick); 3–6.5× faster |
 | Maze firmware, single 590 s runs, left-hand loop-proof strategy, 8 tuning tracks | finish | 2 of 8 (estimate of current state; not yet a benchmark) |
 | Junction identity over a 590 s run | 0 wrong matches | 4–11 wrong matches (lab/tools/junction_matches.py) — open |
+| Search 1 (24 variants, successive halving to 36 tuning tracks, single 590 s runs) | rank variants | best 22/36 = 61 % (ORDER=3 away-from-start, explore 0.8, junction 0.5, turn 0.6); leaderboard in lab/firmware/examples/maze/search-2026-11-19.csv |
+| Full sessions, best values, no dry run (dry_s 0), 12 tuning tracks not used in the search (tune-0113…0124) | finish | 7/12 = 58 % (95 % interval about 32–81 %); every failure ran out of time |
+| Same with a 300 s / 480 s dry run | finish | 3/12 and 0/12: the memory route run takes 165–185 s on this slow robot, and a split exploration restarts from the start |

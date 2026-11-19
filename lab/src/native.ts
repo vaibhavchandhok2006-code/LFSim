@@ -178,3 +178,22 @@ export class NativeFirmwareBrain extends FirmwareBrain {
     return `S ${(sn.tickLeft_s * 1e6).toFixed(3)} ${sn.now_us} ${sn.costAdc_s * 1e6} ${sn.costCall_s * 1e6} ${adc.length} ${adc.join(' ')} ${pc.length} ${pc.join(' ')}\n`;
   }
 }
+
+// A basic guard for firmware written by an AI agent before it is compiled and run as a native program: refuse calls
+// that reach files, processes or the network, and inline assembly. Not a sandbox — it catches mistakes and obvious
+// misuse; review agent changes before trusting them (see DECISIONS.md).
+const BANNED: [RegExp, string][] = [
+  [/\b(system|popen|fork|vfork|execl|execlp|execle|execv|execvp|execve|posix_spawn|dlopen|syscall)\s*\(/, 'process or system call'],
+  [/\b(fopen|freopen|open|openat|creat|unlink|remove|rename|mkdir|rmdir|opendir)\s*\(/, 'file access'],
+  [/\b(socket|connect|bind|listen|accept|getaddrinfo|gethostbyname)\s*\(/, 'network access'],
+  [/\b(asm|__asm__|__asm)\b/, 'inline assembly'],
+  [/#\s*include\s*<(unistd|fcntl|dirent|dlfcn|spawn|netdb|windows|io|process)\.h>|#\s*include\s*<(sys|arpa|netinet)\//, 'system header'],
+];
+export function checkUntrusted(sources: string[]): string[] {
+  const out: string[] = [];
+  for (const f of sources) {
+    const text = fs.readFileSync(f, 'utf8').replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
+    for (const [re, what] of BANNED) if (re.test(text)) out.push(`${path.basename(f)}: ${what} (${re.exec(text)![0].trim()})`);
+  }
+  return out;
+}

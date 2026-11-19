@@ -25,25 +25,25 @@
 #define LOOP_MS 2                /* control period (FreeRTOS ticks at 1 kHz) */
 #endif
 #ifndef SPEED_EXPLORE
-#define SPEED_EXPLORE 0.45       /* duty 0..1 on lines while exploring */
+#define SPEED_EXPLORE 0.8       /* duty 0..1 on lines while exploring */
 #endif
 #ifndef SPEED_MEMORY0
-#define SPEED_MEMORY0 0.55       /* duty on the memory run, switch level 0..3 */
+#define SPEED_MEMORY0 0.8        /* duty on the memory run, switch level 0..3 */
 #endif
 #ifndef SPEED_STEP
 #define SPEED_STEP 0.1           /* each switch level adds this */
 #endif
 #ifndef SPEED_JUNCTION
-#define SPEED_JUNCTION 0.3       /* duty while crossing a junction and creeping to it */
+#define SPEED_JUNCTION 0.5       /* duty while crossing a junction and creeping to it */
 #endif
 #ifndef SPEED_TURN
-#define SPEED_TURN 0.35          /* duty of each wheel while spinning in place */
+#define SPEED_TURN 0.6          /* duty of each wheel while spinning in place */
 #endif
 #ifndef KP
-#define KP 0.02                  /* duty per mm of line error */
+#define KP 0.025                  /* duty per mm of line error */
 #endif
 #ifndef KD
-#define KD 0.0008                /* duty per mm/s of error change */
+#define KD 0.0012                /* duty per mm/s of error change */
 #endif
 #ifndef ACCEL
 #define ACCEL 2.0                /* max change of the base duty per second */
@@ -54,7 +54,7 @@
 #define BLACK_ON 500             /* calibrated reading (0..1000) above which a sensor sees black */
 #endif
 #ifndef WIDE_N
-#define WIDE_N 5                 /* this many black sensors (or an outer one plus the centre) = something crosses */
+#define WIDE_N 6                 /* this many black sensors (or an outer one plus the centre) = something crosses */
 #endif
 #ifndef FINISH_MM
 #define FINISH_MM 90.0           /* all black for this long = the finish square */
@@ -71,7 +71,7 @@
 #define SWATH 1                  /* 1: read junctions from the swath picture (angles); 0: left/straight/right pattern */
 #endif
 #ifndef READ_MM
-#define READ_MM 80.0             /* read the picture once the bar is this far past the junction */
+#define READ_MM 60.0             /* read the picture once the bar is this far past the junction */
 #endif
 #ifndef SCAN_MODE
 #define SCAN_MODE 0              /* 0: read branches from the pattern while passing; 1: spin once at each new junction */
@@ -126,7 +126,7 @@
 
 /* ---- strategy */
 #ifndef ORDER
-#define ORDER 0                  /* which new branch first: 0 left, 1 right, 2 straight, 3 away from start, 4 random,
+#define ORDER 3                  /* which new branch first: 0 left, 1 right, 2 straight, 3 away from start, 4 random,
                                     5 best untried branch on the whole map (W_FAR), 6 pure left hand, 7 pure right hand,
                                     8 left hand but each line once per direction, then the nearest untried branch,
                                     9 the same with the right hand */

@@ -1,35 +1,107 @@
 {
   "schema": "lfsim-lab/search",
   "version": 1,
-  "sources": ["main/main.c", "main/hw.c", "main/maze_map.c", "main/swath.c"],
+  "sources": [
+    "main/main.c",
+    "main/hw.c",
+    "main/maze_map.c",
+    "main/swath.c"
+  ],
   "wiring": "main/wiring.json",
   "robot": "../../../examples/rmi-test-rig.robot.json",
-  "defines": ["CONFIG_FREERTOS_HZ=1000"],
+  "defines": [
+    "CONFIG_FREERTOS_HZ=1000"
+  ],
   "operator": {
-    "first": { "presses": [{ "gpio": 4, "at_s": 0.3 }, { "gpio": 4, "at_s": 3.8 }, { "gpio": 4, "at_s": 4.3 }], "sweep": { "from_s": 0.5, "to_s": 3.6 } },
-    "each": { "presses": [{ "gpio": 4, "at_s": 0.3 }] }
+    "first": {
+      "presses": [
+        {
+          "gpio": 4,
+          "at_s": 0.3
+        },
+        {
+          "gpio": 4,
+          "at_s": 3.8
+        },
+        {
+          "gpio": 4,
+          "at_s": 4.3
+        }
+      ],
+      "sweep": {
+        "from_s": 0.5,
+        "to_s": 3.6
+      }
+    },
+    "each": {
+      "presses": [
+        {
+          "gpio": 4,
+          "at_s": 0.3
+        }
+      ]
+    }
   },
-  "base": { "KP": 0.025, "KD": 0.0012 },
+  "base": {
+    "KP": 0.025,
+    "KD": 0.0012
+  },
   "params": {
-    "ORDER": [8, 9, 3, 0, 1],
-    "SPEED_EXPLORE": [0.8, 0.6, 0.7, 0.9, 1.0],
-    "SPEED_JUNCTION": [0.5, 0.4, 0.6, 0.7],
-    "SPEED_TURN": [0.6, 0.45, 0.75],
-    "WIDE_N": [5, 4, 6],
-    "AHEAD_MM": [30, 20, 45],
-    "DEADEND_MM": [35, 25, 50],
-    "RELOC_MM": [150, 100, 200],
-    "MATCH_MM": [60, 40, 80],
-    "DEAD_SCAN": [1, 0],
-    "SNAP": [1, 0],
-    "FRONTIER": [1, 0]
+    "ORDER": [
+      8,
+      9,
+      3
+    ],
+    "SPEED_EXPLORE": [
+      0.8,
+      0.9,
+      1.0,
+      0.7
+    ],
+    "SPEED_JUNCTION": [
+      0.5,
+      0.4,
+      0.6
+    ],
+    "SPEED_TURN": [
+      0.6,
+      0.75,
+      0.45
+    ],
+    "READ_MM": [
+      80,
+      60,
+      100
+    ],
+    "RELOC_MM": [
+      150,
+      110,
+      200
+    ],
+    "DEAD_SCAN": [
+      1,
+      0
+    ],
+    "KNOWN_ADD": [
+      0,
+      1
+    ],
+    "WIDE_N": [
+      5,
+      4,
+      6
+    ]
   },
   "set": "../../../tracksets/rr-2027",
   "part": "tune",
   "mode": "run",
   "seconds": 590,
-  "samples": 40,
-  "rounds": [4, 12, 36],
+  "samples": 24,
+  "rounds": [
+    4,
+    12,
+    36
+  ],
   "keep": 0.34,
   "seed": 1
 }

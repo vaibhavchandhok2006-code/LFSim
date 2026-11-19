@@ -99,3 +99,16 @@ describe('native firmware: flash and switches', () => {
     expect(outs[1]).toContain('switch: 0');
   }, 120_000);
 });
+
+describe('agent-written firmware guard', () => {
+  it('refuses process, file and network calls, inline assembly and system headers; comments do not count', async () => {
+    const { checkUntrusted } = await import('./native');
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'guard-'));
+    const f = (name: string, text: string) => { const p = path.join(dir, name); fs.writeFileSync(p, text); return p; };
+    expect(checkUntrusted([f('ok.c', '/* system("x") in a comment */ int a(void) { return abs(-1); } // fopen(')])).toEqual([]);
+    expect(checkUntrusted([f('a.c', 'void f(void) { system("rm -rf /"); }')]).join()).toMatch(/process/);
+    expect(checkUntrusted([f('b.c', 'void f(void) { FILE *x = fopen("a", "w"); }')]).join()).toMatch(/file/);
+    expect(checkUntrusted([f('c.c', '#include <sys/socket.h>\n')]).join()).toMatch(/system header/);
+    expect(checkUntrusted([f('d.c', 'void f(void) { __asm__("nop"); }')]).join()).toMatch(/assembly/);
+  });
+});

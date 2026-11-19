@@ -454,7 +454,11 @@ static int choose(int n) {
     double v = abs(r) > 1500 ? -1e9 : r;
     if (v > bp) { bp = v; best = k; }
   }
-  return best;
+  if (best >= 0) return best;
+  /* nothing allowed: never stop in the maze — take any line that is not the start square, else turn back */
+  for (int k = 0; k < p->n; k++) if (!(p->ex[k].state == EX_EDGE && p->ex[k].to == 0) && abs(rel10(p->ex[k].dir)) <= 1500) return k;
+  for (int k = 0; k < p->n; k++) if (!(p->ex[k].state == EX_EDGE && p->ex[k].to == 0)) return k;
+  return -1;
 }
 
 /* Which known junction is this? On a line we know, the one at its other end. On a new line, a known junction only if
@@ -520,7 +524,7 @@ static int junction_update(double jx, double jy, double ahead_mm, const crossing
   g_ahead = ahead_mm;
   int n = locate(jx, jy, h, obs, nobs);
   bool fresh = n < 0;
-  if (fresh) { n = map_add_node(jx, jy); if (n < 0) { *k = -1; return -1; } }
+  if (fresh) { n = map_add_node(jx, jy); if (n < 0) { n = map_find(jx, jy, 1e9); fresh = false; } } /* map full: the nearest */
   else {
     /* Back at a known junction. Heading: the journey measured from the junction we left should point exactly at
      * this one; the angle between the two is the heading error (any line shape). Then correct the position. */
@@ -713,7 +717,7 @@ void app_main(void) {
       for (int i = 0; i < m; i++) if (abs(angle_diff10(dirs[i], back)) > 400) others++;
       if (others > 0) {
         int k, n = junction_update(X, Y, 0, NULL, true, dirs, m, &k);
-        if (n < 0 || k < 0) stop_forever("no way on");
+        if (n < 0 || k < 0) { printf("no way on: turning back\n"); spin_to(norm10(th10() + 1800), 1, 0); depart_odo = ODO; det_reset(); th_hold = TH; continue; }
         cur_node = n; cur_exit = k;
         turn_onto(n, k);
         depart_odo = ODO; last_err = 0;
@@ -746,7 +750,7 @@ void app_main(void) {
         int dirs[MAX_EXITS];
         int m = scan(dirs);
         n = junction_update(c0.jx, c0.jy, 0, NULL, true, dirs, m, &k);
-        if (n < 0 || k < 0) stop_forever("no way on");
+        if (n < 0 || k < 0) { printf("no way on: turning back\n"); spin_to(norm10(th10() + 1800), 1, 0); depart_odo = ODO; det_reset(); th_hold = TH; continue; }
         cur_node = n; cur_exit = k;
         turn_onto(n, k);
         depart_odo = ODO; last_err = 0;
@@ -769,7 +773,7 @@ void app_main(void) {
 #endif
       double cx = c0.jx, cy = c0.jy;
       n = junction_update(cx, cy, ahead, &c0, false, NULL, 0, &k);
-      if (n < 0 || k < 0) stop_forever("no way on");
+      if (n < 0 || k < 0) { printf("no way on: turning back\n"); spin_to(norm10(th10() + 1800), 1, 0); depart_odo = ODO; det_reset(); th_hold = TH; continue; }
       cur_node = n; cur_exit = k;
       depart_odo = ODO + ahead;
       if (abs(rel10(M.node[n].ex[k].dir)) > 300) {

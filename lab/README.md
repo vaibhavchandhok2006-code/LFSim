@@ -87,3 +87,26 @@ A design can name C firmware instead of Settings-mode values (see `examples/rmi-
   The firmware reads them with `gpio_get_level`. Changing switches in the scored part counts as an adjustment (2027).
 - The operator moves from the explore setting to the memory settings after the robot has finished once.
 - Pins used by the sensors, ADC, driver or encoders can't be used for switches or buttons (checked on load).
+
+## Maze firmware, search and the algorithm agent (Phase 5)
+
+```
+# one track, one long run of the maze firmware; then a picture of its path and map
+npx tsx lab/tools/try-maze.ts tune-0003 run "LFSIM_FAST_IO" /tmp/a
+python3 lab/tools/plot_run.py tune-0003 /tmp/a.png /tmp/a --flip
+
+# try many config.h variants on the tuning tracks (all variants on a few tracks, the best third on more …)
+npm run lab -- search --space lab/firmware/examples/maze/search.json --workers 7
+
+# the algorithm agent: Claude Code improves the firmware in rounds; a round is kept only if it finishes more
+npm run lab -- agent --rounds 10 --tracks 12 --held 24
+```
+
+- `search.json` lists `config.h` names and the values to try; results go to `lab/results/search-…/leaderboard.csv`
+  and `best.json` (the best values).
+- The agent follows `lab/agent/ALGORITHM_AGENT.md`, keeps notes in `lab/agent/state.md`, commits kept rounds and
+  undoes the rest. It may only edit `lab/firmware/examples/maze/main/` and run the lab tools.
+- **Safety.** Agent-written C runs as a normal program on your computer. Before building it, the runner refuses file,
+  process and network calls, inline assembly and system headers — a guard, not a sandbox. Run the agent on a branch,
+  read what it changed, and keep your own files out of the repository folder.
+- Uses your Claude plan's limits (each round is one Claude Code session).

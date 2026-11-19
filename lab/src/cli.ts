@@ -17,6 +17,7 @@ import type { StartMsg } from '../../src/worker/protocol';
 import { designFromRobot, loadDesign } from './design';
 import { runBench, summarise } from './bench';
 import { loadSpace, runSearch, formatRanked } from './search';
+import { runAgent } from './agent';
 import { writeProgress, writeResults } from './report';
 import { VARIATIONS } from './variations';
 import { loadInputs, type InputOptions } from './inputs';
@@ -37,6 +38,8 @@ Commands
   bench         Run a design over a track set: full 10-minute sessions, report folder
   search        Try many build-time variants of a firmware (config.h values) on a track set and rank them
                 (--space file.json --out dir --workers N --samples N)
+  agent         Algorithm agent: Claude Code improves the maze firmware in rounds; kept only if it finishes more
+                (--rounds 10 --tracks 12 --held 24 --model M); needs Claude Code installed and signed in
   doctor        Check Node.js, Git, a C compiler and Claude Code on this computer
 
 tracks make options
@@ -126,6 +129,13 @@ export async function main(argv: string[]): Promise<number> {
   if (cmd === 'tracks make' || cmd === 'tracks check' || cmd === 'tracks sheet') return tracksCmd(cmd, flags);
   if (cmd === 'bench') return benchCmd(flags);
   if (cmd === 'search') return searchCmd(flags);
+  if (cmd === 'agent') {
+    const out = str(flags, 'out') ?? `lab/results/agent-${new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-')}`;
+    await runAgent({ rounds: num(flags, 'rounds') ?? 10, tracks: num(flags, 'tracks') ?? 12, heldTracks: num(flags, 'held') ?? 24,
+      workers: num(flags, 'workers'), model: str(flags, 'model'), claude: str(flags, 'claude'), outDir: out,
+      spaceFile: str(flags, 'space') ?? 'lab/firmware/examples/maze/search.json', log: (s) => process.stderr.write(s) });
+    return 0;
+  }
   if (cmd !== 'run') throw new Error(`Unknown command "${cmd}". Try: npm run lab -- help`);
   const known = new Set(['project', 'track', 'robot', 'mode', 'algorithm', 'seed', 'memory', 'seconds', 'keep-going', 'csv', 'json', 'save-memory', 'chunk', 'corners', 'track-png', 'firmware', 'wiring', 'presses', 'sweep', 'freertos-hz', 'serial']);
   for (const k of flags.keys()) if (!known.has(k)) throw new Error(`Unknown option --${k}`);
