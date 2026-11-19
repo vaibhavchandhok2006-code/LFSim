@@ -191,3 +191,6 @@ CSV / PNG / HTML report / GIF (2.0 MB) downloads, dark theme. No page or worker 
 | Search 1 (24 variants, successive halving to 36 tuning tracks, single 590 s runs) | rank variants | best 22/36 = 61 % (ORDER=3 away-from-start, explore 0.8, junction 0.5, turn 0.6); leaderboard in lab/firmware/examples/maze/search-2026-11-19.csv |
 | Full sessions, best values, no dry run (dry_s 0), 12 tuning tracks not used in the search (tune-0113…0124) | finish | 7/12 = 58 % (95 % interval about 32–81 %); every failure ran out of time |
 | Same with a 300 s / 480 s dry run | finish | 3/12 and 0/12: the memory route run takes 165–185 s on this slow robot, and a split exploration restarts from the start |
+| Search 2 (24 variants: turn/junction/explore speeds, strategies 3/5/8, W_FAR, turn cost, read distance, KP) | improve on the defaults | none did: the defaults stay best at 22/36 = 61 % (lab/firmware/examples/maze/search-2026-11-19b.csv) |
+| **Held-out**: full sessions, no dry run, 24 held-out tracks never used in tuning | ≥ 95 % (goal) | **10/24 = 42 %** (95 % interval about 24–61 %); 13 ran out of time, 1 stuck; finish times 204–565 s |
+| Arc turns (ARC_TURNS=1), 2 tracks | faster than stop-and-spin | worse (spin time 68 → 223 s): kept off, for the agent to fix |

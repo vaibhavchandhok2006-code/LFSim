@@ -79,6 +79,12 @@
 #ifndef CAPTURE_DEG
 #define CAPTURE_DEG 40.0         /* while turning, a line within this of the target heading is the branch */
 #endif
+#ifndef ARC_TURNS
+#define ARC_TURNS 0              /* 1: turn onto a branch on an arc without stopping (ARC_R_MM); 0: stop and spin */
+#endif
+#ifndef ARC_R_MM
+#define ARC_R_MM 60.0            /* arc radius: the inner wheel turns at (1 - track/2/R) of the outer's speed ratio */
+#endif
 #ifndef COUNT_DEG
 #define COUNT_DEG 70.0           /* ...or the expected line by count, if it is within this of the target */
 #endif

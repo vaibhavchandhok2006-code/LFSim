@@ -576,6 +576,30 @@ static int junction_update(double jx, double jy, double ahead_mm, const crossing
   return n;
 }
 
+/* Arc turn (ARC_TURNS): inner wheel slow, outer fast, at junction speed; done when the line is under the middle of the
+ * bar near the wanted heading. Returns false if it turned 60° past the target without finding the line. */
+static bool arc_turn(int target10, int dir) {
+  double v = SPEED_JUNCTION, k = (TRACK_MM / 2) / ARC_R_MM;
+  double outer = v * (1 + k), inner = v * (1 - k);
+  if (outer > 1) { inner *= 1 / outer; outer = 1; }
+  int64_t t0 = hw_us();
+  double start = TH;
+  bool left_line = !centre();
+  for (;;) {
+    odometry(); sense(); dt_s();
+    if (dir > 0) hw_motors(inner, outer); else hw_motors(outer, inner);
+    double turned = fabs(TH - start);
+    int d = abs(angle_diff10(th10(), target10));
+    if (!centre()) left_line = true;
+    if (left_line && turned > 20 * PI / 180 && d <= CAPTURE_DEG * 10 && line_ok && nb <= 4 && dir * line_mm <= 0) break;
+    if (angle_diff10(th10(), target10) * dir > 600) { t_spin += (hw_us() - t0) / 1e6; swath_clear(); swath_odo = -1; return false; }
+    hw_wait_ms(LOOP_MS);
+  }
+  t_spin += (hw_us() - t0) / 1e6; n_turns++;
+  swath_clear(); swath_odo = -1;
+  return true;
+}
+
 /* A turn found no line: look all the way round and take the line nearest the wanted heading. */
 static void recover(int want10) {
   int dirs[MAX_EXITS];
@@ -688,6 +712,25 @@ void app_main(void) {
     if (turn_pending) {
       t_creep += dt;
       double ahead = (pend_x - X) * cos(TH) + (pend_y - Y) * sin(TH);
+#if ARC_TURNS
+      /* turn on an arc of radius ARC_R_MM without stopping: start R·tan(θ/2) before the junction, so the sensors land on
+       * the new line as the turn ends (a spin on the spot is the case R = 0) */
+      {
+        int want = pend_n >= 0 ? M.node[pend_n].ex[pend_k].dir : pend_k, r10 = angle_diff10(want, th10());
+        double th = abs(r10) * PI / 1800;
+        if (th > 30 * PI / 180 && th < 140 * PI / 180 && ahead <= ARC_R_MM * tan(th / 2)) {
+          int dir = r10 > 0 ? 1 : -1;
+          if (arc_turn(want, dir)) {
+            turn_pending = false;
+            if (pend_n >= 0) { if (M.node[pend_n].ex[pend_k].state == EX_NEW) M.node[pend_n].ex[pend_k].dir = (int16_t)th10(); depart_odo = ODO; }
+            last_err = 0; det_reset(); th_hold = TH;
+            hw_wait_ms(LOOP_MS);
+            continue;
+          }
+          ahead = 0; /* the arc found nothing: finish with a spin on the spot below */
+        }
+      }
+#endif
       steer(SPEED_JUNCTION, dt, det == 0 && nb >= 1 && nb <= 3, th_hold);
       if (ahead <= 0) {
         turn_pending = false;
