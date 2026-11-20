@@ -47,28 +47,22 @@ APIs · ordering parts automatically · other bots on the maze at the same time.
 **Later versions:** other competitions' rulebooks; 4WD and suction-fan physics; custom PCB layout; public packaging and
 setup wizard.
 
-## Robo-Run rules used (Shaastra Robo-Run 2027 rulebook; updated 2026-11-18)
+## Robo-Run rules used (from the Shaastra Robo-Run problem statement)
 
-Mat **16 × 16 grid of 25 cm squares (4 m × 4 m)**, enclosed; lines black on white, 3–4 cm; start square fully black
-in a corner; start line between the first and second squares; timer from the front edge crossing the start line to
-the front edge entering the destination; the destination is at the end of the maze track, has one pathway, a simple
-line follower cannot easily find it, multiple paths exist; features: 45° and 90° turns, intersections, dead ends,
-curves, curved turns (¼ or ½ circle), junctions. Bot at most 20 × 20 cm, self-contained, no camera. 10 minutes of
-access including adjustments (plus 1 minute of calibration, not counted); the 10 minutes are either 1 dry run (x min,
-not scored) + 1 actual run (10 − x min) or 2 actual runs (best counts); multiple runs; every exit from the start square
-is a new run; re-entering the start square aborts the run (restart penalty). First round time score = run time + 5 s
-per line crossing + 2 s per restart + 3 s per adjustment (changing switches, batteries, sensors or speed settings
-counts as an adjustment). Bots that do not reach the destination score (time + penalties) / C, C = value of the
-furthest checkpoint covered. Final round: restart 8 s, adjustment 5 s, and 15 s per yellow 10 cm block not pushed off
-its yellow square (blocks sit at dead ends; a cleared square becomes a checkpoint) — stored as data, not yet
-simulated. No reprogramming after the maze is shown; switches (algorithm, speed) allowed; weight may not change. The
-2026 edition (10 × 10 grid, off-line N/20 × run time) is kept as `roborun-2026.json`.
+Mat 10 × 10 grid of 25 cm squares, enclosed; lines black on white, 3–4 cm; start square fully black in a corner; start
+line between the first and second squares; timer starts when the bot's front edge crosses it and stops when the front
+edge enters the destination square; the destination has one pathway and is placed so a simple line follower cannot
+easily find it; multiple paths exist. Bot at most 20 × 20 cm, self-contained. 10 minutes of maze access including
+adjustments; multiple runs; every exit from the start square is a new run; re-entering the start square before the
+destination aborts the run; the fastest valid official time counts. After the maze is shown: no reprogramming or
+feeding maze information; switch settings (algorithm, speed), battery changes, sensor adjustments and repairs are
+allowed; weight may not change. Lighting is not fixed.
 
 ## Inputs, outputs and file formats
 
 | File | Format | Holds |
 | --- | --- | --- |
-| Competition profile | `competition/roborun-2027.json` (and `roborun-2026.json`) | The rules above as data: sizes, session length, penalties, abort rule, allowed changes |
+| Competition profile | `competition/roborun.json` | The rules above as data: sizes, session length, penalties, abort rule, allowed changes |
 | Track | `.track.json` (LFSim) + PNG | Top-down image at 2 mm/px, squares, generator seed and features |
 | Track set | `tracksets/<name>/` | Tracks split into tuning and held-out, plus a manifest and feature statistics |
 | Reference images | PNG/JPEG + 4 corner points | Shaastra photos, rectified to top-down |
@@ -166,8 +160,8 @@ jobs · AI-written firmware runs only in the simulator until the user flashes it
 | Phase | Delivers | Done when |
 | --- | --- | --- |
 | 0. Setup | Windows setup; simulator from the command line | Headless = website for the same seed; CI on Linux — **done 2026-11-16** |
-| 1. Tracks + benchmark | Competition profile, track generator, photo import, track sets, session simulation, what-if report, live page, results viewer | 500 tracks pass the checker; statistics within reference ranges; samples approved; every rule tested; speed target; what-if report for the current robot — **built 2026-11-18** (sample approval pending; see VALIDATION.md) |
-| 2. Firmware in the loop | Hardware shim; C compiled and run in the sim; ESP32 build | main.c matches its JS translation on 20 tracks; ESP32 build in CI (**done 2026-11-19**: a reference firmware in C and in JS gives identical logs on 20 tracks; the RMI firmware runs unchanged; both build for ESP32) |
+| 1. Tracks + benchmark | Competition profile, track generator, photo import, track sets, session simulation, what-if report, live page, results viewer | 500 tracks pass the checker; statistics within reference ranges; samples approved; every rule tested; speed target; what-if report for the current robot |
+| 2. Firmware in the loop | Hardware shim; C compiled and run in the sim; ESP32 build | main.c matches its JS translation on 20 tracks; ESP32 build in CI |
 | 3. Calibration | Test firmware, log import, fit, report | Straight ±5 %, spin ±10 %, sensors ±10 % (targets, estimate) |
 | 4. Parameter optimiser | Control and Mode A geometry search; switch table | Beats the hand-tuned baseline on held-out tracks beyond run-to-run spread |
 | 5. Algorithm agent | Claude Code loop for maze logic in C | ≥ 95 % finish over full sessions on held-out tracks, then faster |

@@ -1,6 +1,6 @@
 # Tasks
 
-Status (18 Nov 2026): LFSim Lab Phase 1 built (sample approval pending). Phase 0 done 16 Nov. Earlier (15 Nov 2026): v1 implemented, and all 21 defects of the Independent Test Report addressed — 20 fixed and
+Status (16 Nov 2026): LFSim Lab Phase 0 done. Earlier (15 Nov 2026): v1 implemented, and all 21 defects of the Independent Test Report addressed — 20 fixed and
 verified, D2 fixed on clean mazes with a documented limit on the dense Robo-Run sample. 77 automated tests pass;
 browser smoke test passes. Next: reality check against the real robot.
 
@@ -25,37 +25,9 @@ browser smoke test passes. Next: reality check against the real robot.
 ## LFSim Lab (spec: LFSim Lab — Spec v1)
 - [x] Phase 0: command line (`npm run lab`), headless runs identical to the website, setup doctor, Windows setup guide,
       CI on Linux (pull requests and branches)
-- [x] Phase 1: competition profile (rules as data), track generator + rule checker, track sets (300 tuning / 200
-      held-out), full 10-minute session simulation, parallel benchmark with report, live progress page, replay projects,
-      review sheet, photo import from four corners (website + command line)
-- [x] Robo-Run 2027 rulebook: 4 m mat, new penalties, dry run, switch changes as adjustments, checkpoints; finish at the
-      far end on most generated mazes (generator v2), new track set `rr-2027`
-- [x] Track sets in stages: stage 1 = variations of the Shaastra maze (default); stage 2 = + route-style mazes;
-      stage 3 = + novel-style group (new shapes, tighter gaps). Report: finish rate by style
-- [ ] Later: move to stage 2, then stage 3, as the robot's finish rate on stage 1 rises
-- [ ] Phase 1 sign-off: you review ~20 sample tracks (`tracks sheet`) and confirm they look like Shaastra mazes
-- [ ] Later: final-round yellow blocks (pushing physics, colour sensor), loop-case checkpoint placement
-- [ ] Ask the organisers: over what span restarts and adjustments are counted; checkpoint places and values; whether a switch change before the first actual run is an adjustment
-- [x] Phase 2: your ESP-IDF C firmware compiled with GCC against a hardware shim and run unchanged in the simulator
-      (`run --firmware`); button presses with interrupts and a calibration sweep; C = JS proved on 20 tracks;
-      both examples build for ESP32 in CI (esp32.yml)
-- [x] Sessions and benchmarks with native firmware (design files), flash (NVS) kept between runs, switches as GPIO levels
-- [ ] Later in Phase 2 scope: Arduino .ino (C++ shim); PCNT,
-      extra FreeRTOS tasks; a sandbox for AI-written native code (before Phase 5)
-- [ ] Phase 3 (calibration): waiting for a working robot
-- [ ] Phase 5 (algorithm agent) — in progress
-  - [x] Generator v6: squares joined to the maze (all earlier rr-2027 results were invalid)
-  - [x] Maze firmware in C (lab/firmware/examples/maze): junctions, odometry map in flash, route planning, start-square guard, strategies
-  - [x] Fast native I/O (32× real time); PCNT in the shim; `lab search` (successive halving over config.h values)
-  - [x] Junction pictures (swath, C port); never-stop fallbacks; `lab agent` runner + source guard
-  - [x] Searches 1–2 (48 variants): best 61 % of single runs; held-out sessions 10/24 = 42 %
-  - [ ] Explore with less driving (revisits); arc turns that work; then search again
-  - [ ] Junction identity: fewer wrong matches in long runs
-  - [ ] ≥ 95 % finish over full sessions on held-out tracks, then faster
-  - [ ] Algorithm agent loop (Claude Code on the laptop) with a sandbox for AI-written code
-- [ ] Phase 4 (optimiser) after Phase 5; 6–8: see the spec
-- Findings for later phases: the current robot with LSRB / Trémaux often drives back into the start square (aborts
-  the run) and explores slowly on dense mazes — work for the algorithm agent (Phase 5)
+- [ ] Phase 1: competition profile, track generator, photo import, track sets, 10-minute session benchmark, what-if report
+      (note: cache the track import and junction graph per track — they take most of a short run's time)
+- [ ] Phase 2–8: see the spec
 
 ## Later versions (not v1)
 - v2: track editor, auto-tuning, share links; better junction reading at dense features. v3: 3D view.

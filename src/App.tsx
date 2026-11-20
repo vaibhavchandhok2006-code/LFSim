@@ -94,10 +94,7 @@ export default function App() {
       })
       .catch((e) => { setError(`Could not read that image: ${String(e)}`); setLoading(false); });
     return () => { cancelled = true; };
-  }, [image, t.presetId, t.custom.width_m, t.custom.height_m, t.custom.lineWidth_cm, t.normaliseWidth, t.swapStartFinish, t.crop?.left_pct, t.crop?.top_pct, t.crop?.right_pct, t.crop?.bottom_pct, JSON.stringify(t.corners ?? null)]); // eslint-disable-line react-hooks/exhaustive-deps
-  // The source photo, for marking an angled photo's corners.
-  const imageUrl = useMemo(() => (image ? URL.createObjectURL(image) : null), [image]);
-  useEffect(() => () => { if (imageUrl) URL.revokeObjectURL(imageUrl); }, [imageUrl]);
+  }, [image, t.presetId, t.custom.width_m, t.custom.height_m, t.custom.lineWidth_cm, t.normaliseWidth, t.swapStartFinish, t.crop?.left_pct, t.crop?.top_pct, t.crop?.right_pct, t.crop?.bottom_pct]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const startPose: Pose = useMemo(() => {
     if (!base) return { x: 0.2, y: 0.2, theta: 0 };
@@ -391,7 +388,7 @@ export default function App() {
       <main className={`work${tab === 'compare' ? ' wide-left' : ''}`}>
         <div className="left">
           {tab === 'robot' && <MRobot profile={app.profile} preset={preset} onChange={setProfile} onExport={exportRobot} onImport={importRobot} />}
-          {tab === 'track' && <MTrack setup={app.track} track={track} messages={messages} loading={loading} imageSize={imgSize} imageUrl={imageUrl} offLine_cm={app.offLine_cm}
+          {tab === 'track' && <MTrack setup={app.track} track={track} messages={messages} loading={loading} imageSize={imgSize} offLine_cm={app.offLine_cm}
             onChange={setTrackSetup} onOffLine={setOffLine} onPickImage={pickImage} onUseSample={useSample} />}
           {tab === 'brain' && <MBrain mode={app.brainMode} onMode={setMode} settings={app.settings} onChange={setSettings} code={app.code} onCode={setCode} onLoadSample={loadSample} />}
           {tab === 'simulate' && <SimPanel flags={app.flags} onFlags={(flags) => setApp((a) => ({ ...a, flags }))} dist={app.disturbances} onDist={(disturbances) => setApp((a) => ({ ...a, disturbances }))}

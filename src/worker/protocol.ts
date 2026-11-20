@@ -23,17 +23,6 @@ export interface Wiring {
   // Board: sets analogRead timing and resolution. ESP32: ~10 µs, 12-bit (analogReadResolution can change it).
   // AVR (Arduino Uno/Nano): ~112 µs per analogRead, always 10-bit. Optional for older files (default ESP32).
   board?: 'esp32' | 'avr';
-  // Push buttons wired to GPIOs (optional): pressed = low when activeLow (pull-up to 3.3 V, switch to ground).
-  buttons?: { gpio: number; activeLow: boolean }[];
-}
-
-// What the operator does with the robot before and during a run (optional): button presses at set times, and a hand
-// sweep of the sensor bar across the line for calibration (the sensors then see the line pass under them).
-export interface OperatorScript {
-  presses: { gpio: number; at_s: number; hold_s?: number }[];
-  sweep?: { from_s: number; to_s: number; period_s?: number };
-  // Switches the operator set before the run (DIP or slide switches): a fixed level on each GPIO for the whole run.
-  levels?: { gpio: number; level: 0 | 1 }[];
 }
 
 export interface StartMsg {
@@ -46,7 +35,6 @@ export interface StartMsg {
   disturbances: Disturbances;
   offLine_cm: number;
   memory: Record<string, unknown>;
-  operator?: OperatorScript;
 }
 export interface AdvanceMsg { type: 'advance'; runId: number; until: number }
 export interface StopMsg { type: 'stop'; runId: number; at: number }

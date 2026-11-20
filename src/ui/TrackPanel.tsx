@@ -1,7 +1,6 @@
 import { Track } from '../track/track';
 import { Group, NumField, SelectField, Toggle } from './Field';
 import { TrackSetup } from './persist';
-import { CornerEditor } from './CornerEditor';
 
 interface Props {
   setup: TrackSetup;
@@ -9,7 +8,6 @@ interface Props {
   messages: string[];
   loading: boolean;
   imageSize: { w: number; h: number } | null;
-  imageUrl: string | null;
   offLine_cm: number;
   onChange: (s: TrackSetup) => void;
   onOffLine: (v: number) => void;
@@ -17,7 +15,7 @@ interface Props {
   onUseSample: () => void;
 }
 
-export function TrackPanel({ setup, track, messages, loading, imageSize, imageUrl, offLine_cm, onChange, onOffLine, onPickImage, onUseSample }: Props) {
+export function TrackPanel({ setup, track, messages, loading, imageSize, offLine_cm, onChange, onOffLine, onPickImage, onUseSample }: Props) {
   const set = <K extends keyof TrackSetup>(k: K, v: TrackSetup[K]) => onChange({ ...setup, [k]: v });
   const setC = <K extends keyof TrackSetup['custom']>(k: K, v: number) => onChange({ ...setup, custom: { ...setup.custom, [k]: v } });
   const pose = track?.startPose;
@@ -43,7 +41,7 @@ export function TrackPanel({ setup, track, messages, loading, imageSize, imageUr
           <button onClick={onUseSample}>Use sample</button>
         </div>
       </div>
-      <p className="panel-note">Use a clean top-down image (its edges are the edges of the track), or an angled photo with the mat's corners marked below. Black lines on white.</p>
+      <p className="panel-note">Use a clean top-down image. Its edges are taken as the edges of the track; black lines on white.</p>
       {loading && <div className="callout">Processing the image…</div>}
       {!loading && messages.length > 0 && (
         <ul className="messages">{messages.map((m) => <li key={m}>{m}</li>)}</ul>
@@ -51,7 +49,7 @@ export function TrackPanel({ setup, track, messages, loading, imageSize, imageUr
 
       <Group title="Rules preset">
         <SelectField label="Preset" value={setup.presetId} onChange={(v) => set('presetId', v)}
-          options={[{ value: 'roborun-2027', label: 'Robo-Run 2027 (Shaastra), 16 × 16 squares, 4 × 4 m' }, { value: 'roborun', label: 'Robo-Run 2026 (Shaastra), 10 × 10 squares, 2.5 × 2.5 m' }, { value: 'custom', label: 'Custom size' }]} />
+          options={[{ value: 'roborun', label: 'Robo-Run (Shaastra), 2.5 × 2.5 m' }, { value: 'custom', label: 'Custom size' }]} />
         {setup.presetId === 'custom' && <>
           <NumField label="Track width" unit="m" value={setup.custom.width_m} min={0.3} step={0.1} onChange={(v) => setC('width_m', v)} />
           <NumField label="Track height" unit="m" value={setup.custom.height_m} min={0.3} step={0.1} onChange={(v) => setC('height_m', v)} />
@@ -63,18 +61,7 @@ export function TrackPanel({ setup, track, messages, loading, imageSize, imageUr
           hint="Keeps the track's shape, changes only line thickness." />
       </Group>
 
-      <Group title="Angled photo" note="For a photo taken at an angle (a frame from a video, say): mark the mat's four corners and the photo is flattened to a top-down track. The crop below is then not used.">
-        {setup.corners && imageUrl && imageSize
-          ? <CornerEditor imageUrl={imageUrl} aspect={imageSize.w / imageSize.h} corners={setup.corners} onCommit={(c) => set('corners', c)} />
-          : null}
-        <div className="row-buttons left crop-buttons">
-          {!setup.corners
-            ? <button disabled={!imageSize} onClick={() => set('corners', [[10, 10], [90, 10], [90, 90], [10, 90]])}>Mark the mat’s corners</button>
-            : <button onClick={() => set('corners', null)}>Remove perspective correction</button>}
-        </div>
-      </Group>
-
-      {!setup.corners && <Group title="Crop" note={imageSize ? `Image ${imageSize.w} × ${imageSize.h} px. Trim the edges so only the mat is left; the kept part is fitted to the track size.` : 'Trim the edges so only the mat is left.'}>
+      <Group title="Crop" note={imageSize ? `Image ${imageSize.w} × ${imageSize.h} px. Trim the edges so only the mat is left; the kept part is fitted to the track size.` : 'Trim the edges so only the mat is left.'}>
         <NumField label="Left" unit="%" value={crop.left_pct} min={0} max={45} step={0.5} onChange={(v) => setCrop('left_pct', v)} />
         <NumField label="Right" unit="%" value={crop.right_pct} min={0} max={45} step={0.5} onChange={(v) => setCrop('right_pct', v)} />
         <NumField label="Top" unit="%" value={crop.top_pct} min={0} max={45} step={0.5} onChange={(v) => setCrop('top_pct', v)} />
@@ -83,7 +70,7 @@ export function TrackPanel({ setup, track, messages, loading, imageSize, imageUr
           <button disabled={!imageSize} onClick={fitCrop}>Crop centre to the track's shape</button>
           <button onClick={() => onChange({ ...setup, crop: { left_pct: 0, top_pct: 0, right_pct: 0, bottom_pct: 0 } })}>No crop</button>
         </div>
-      </Group>}
+      </Group>
 
       <Group title="Start and finish">
         <p className="group-text">

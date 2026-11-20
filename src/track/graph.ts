@@ -51,21 +51,6 @@ function crossings(sk: Uint8Array, w: number, i: number): number {
   return c;
 }
 
-// Branches leaving a square ring of radius r around a pixel. Thinning can leave a small blob where lines meet (no single
-// pixel then has 3 crossings); counted on a ring a few pixels out, the branches still show.
-function ringCrossings(sk: Uint8Array, w: number, h: number, i: number, r: number): number {
-  const x = i % w, y = (i - x) / w;
-  if (x < r || y < r || x >= w - r || y >= h - r) return 0;
-  const ring: number[] = [];
-  for (let k = -r; k < r; k += 1) ring.push((y - r) * w + x + k);
-  for (let k = -r; k < r; k += 1) ring.push((y + k) * w + x + r);
-  for (let k = r; k > -r; k -= 1) ring.push((y + r) * w + x + k);
-  for (let k = r; k > -r; k -= 1) ring.push((y + k) * w + x - r);
-  let c = 0;
-  for (let k = 0; k < ring.length; k += 1) if (!sk[ring[k]] && sk[ring[(k + 1) % ring.length]]) c += 1;
-  return c;
-}
-
 function degreeAt(sk: Uint8Array, w: number, i: number): number {
   const x = i % w, y = (i - x) / w;
   let d = 0;
@@ -111,7 +96,7 @@ export function buildGraph(t: Track): JunctionGraph {
   for (let i = 0; i < w * h; i += 1) {
     if (!sk[i]) continue;
     const d = degreeAt(sk, w, i);
-    if (crossings(sk, w, i) >= 3 || (d >= 3 && ringCrossings(sk, w, h, i, 3) >= 3)) {
+    if (crossings(sk, w, i) >= 3) {
       const x = i % w, y = (i - x) / w;
       for (let dy = -3; dy <= 3; dy += 1) for (let dx = -3; dx <= 3; dx += 1) { const j = (y + dy) * w + x + dx; if (sk[j]) nodeMask[j] = 1; }
     } else if (d === 1) nodeMask[i] = 1;
