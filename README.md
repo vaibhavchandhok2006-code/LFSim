@@ -22,7 +22,8 @@ It is made for competitions with loops, curves, squares, dead ends and a finish 
   memory runs for LSRB and Trémaux.
 - **Code mode** — run your own Arduino / ESP-IDF firmware, translated to LFSim firmware JS
   (see [docs/FIRMWARE_API.md](docs/FIRMWARE_API.md)), against a simulated ESP32 (or Arduino Uno/Nano) + driver, in a locked-down sandbox, with a serial console
-  and a side-by-side view of the original code.
+  and a side-by-side view of the original code. Also an I²C QMC5883L compass and push buttons driven by an operator
+  script; example: `examples/magnetometer-maze/`.
 - **Rulebook timing** — timer from leaving start to entering finish, judge-style off-line count (including crossing
   white to another line), start-square re-entry logged. No auto-stop: you stop the run.
 - **Analysis** — timeline scrub and step, live graphs (error/PID, wheel speeds/PWM, battery, raw sensors),

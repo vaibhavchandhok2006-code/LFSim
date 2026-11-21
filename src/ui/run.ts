@@ -90,7 +90,10 @@ export class RunData {
   // Results as they stood at time t.
   at(t: number) {
     const upto = <T extends { t: number }>(a: T[]) => a.filter((e) => e.t <= t + 1e-9);
-    const ev = upto(this.events);
+    // The operator putting the robot back on the start (before the run) restarts timing and counting, as in the simulator.
+    const all = upto(this.events);
+    const placed = all.filter((e) => e.kind === 'placed').pop();
+    const ev = placed ? all.filter((e) => e.t >= placed.t) : all;
     const start = ev.find((e) => e.kind === 'start')?.t ?? null;
     const finish = ev.find((e) => e.kind === 'finish')?.t ?? null;
     const off = ev.filter((e) => e.kind === 'offline').length;

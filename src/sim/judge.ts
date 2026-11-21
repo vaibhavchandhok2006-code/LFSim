@@ -72,6 +72,9 @@ export class ShortcutJudge {
   // Call regularly with the axle position. Returns true when the robot has just reached a line it is not connected to.
   onLine = false; // true when the last update found the axle on a segment
 
+  // Forget where the robot was (it was picked up and put down somewhere else).
+  reset(x: number, y: number): void { this.lastEdge = -1; this.lastAlong = 0; this.moved = 0; this.lastX = x; this.lastY = y; this.onLine = false; }
+
   update(x: number, y: number, ignore: boolean): boolean {
     this.moved += Math.hypot(x - this.lastX, y - this.lastY);
     this.lastX = x; this.lastY = y;

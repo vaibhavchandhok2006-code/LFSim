@@ -6,6 +6,7 @@ import { DEFAULT_SETTINGS, SettingsParams } from '../brain/settings';
 import { DEFAULT_FLAGS, SimFlags } from '../sim/simulation';
 import { Disturbances, Wiring } from '../worker/protocol';
 import { SAMPLE_WIRING } from '../brain/sampleFirmware';
+import { wiringExtrasProblems } from '../brain/operator';
 import type { RunSummary } from './run';
 
 export interface CodeSetup {
@@ -190,6 +191,8 @@ export function parseImport(text: string): Imported {
     if (bad) throw new Error(`The project file has an invalid number at ${bad}.`);
     const problems = profileProblems(settings.profile);
     if (problems.length) throw new Error(`The project's robot has values out of range: ${problems.slice(0, 5).join(' ')}`);
+    const extra = wiringExtrasProblems(settings.code.wiring);
+    if (extra.length) throw new Error(`The project's wiring has problems: ${extra.slice(0, 5).join(' ')}`);
     const runs = Array.isArray(j.runs) ? (j.runs as RunSummary[]).filter((r) => isObj(r) && typeof r.label === 'string').slice(0, 200) : [];
     return { kind: 'project', value: { lfsim: 'project', version: 1, settings, trackImage: j.trackImage ? checkImage(j.trackImage) : null, runs, memory: isObj(j.memory) ? j.memory : null } };
   }
@@ -214,6 +217,8 @@ export function parseImport(text: string): Imported {
       if (isObj(firmware.wiring)) {
         code.wiring = merge(SAMPLE_WIRING, firmware.wiring);
         if (code.wiring.board !== undefined && code.wiring.board !== 'esp32' && code.wiring.board !== 'avr') throw new Error(`The robot file's board must be "esp32" or "avr" (got ${String(code.wiring.board)}).`);
+        const extra = wiringExtrasProblems(code.wiring);
+        if (extra.length) throw new Error(`The robot file's wiring has problems: ${extra.slice(0, 5).join(' ')}`);
       }
     }
     return { kind: 'robot', value, code };

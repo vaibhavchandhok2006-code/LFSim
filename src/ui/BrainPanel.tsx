@@ -3,6 +3,7 @@ import { Algorithm, MEMORY_ALGORITHMS, SettingsParams } from '../brain/settings'
 import { Wiring } from '../worker/protocol';
 import { Group, NumField, SelectField } from './Field';
 import { CodeSetup } from './persist';
+import { formatButtons, formatOperator, parseButtons, parseOperator } from '../brain/operator';
 
 interface Props {
   mode: 'settings' | 'code';
@@ -157,6 +158,48 @@ function CodeForm({ code, onCode, onLoadSample }: { code: CodeSetup; onCode: (c:
         <NumField label="Right IN2" value={w.driver.rightIn2} min={0} onChange={(v) => setD({ rightIn2: v })} />
         <NumField label="Standby pin (−1 = none)" value={w.driver.standby ?? -1} min={-1} onChange={(v) => setD({ standby: v < 0 ? null : v })} />
       </Group>
+
+      <ExtrasGroup key={JSON.stringify([w.buttons ?? [], w.operator ?? []])} w={w} setW={setW} />
     </>
+  );
+}
+
+// Buttons, compass and the operator script (what the person at the track does, at set times).
+function ExtrasGroup({ w, setW }: { w: Wiring; setW: (p: Partial<Wiring>) => void }) {
+  const activeLow = w.buttons?.[0]?.activeLow ?? true;
+  const [btnText, setBtnText] = useState(formatButtons(w.buttons));
+  const [opText, setOpText] = useState(formatOperator(w.operator));
+  const btn = parseButtons(btnText, activeLow);
+  const op = parseOperator(opText);
+  const names = new Set((w.buttons ?? []).map((b) => b.name));
+  const unknown = op.steps.filter((s) => s.action === 'press' && !names.has(s.button)).map((s) => (s.action === 'press' ? s.button : ''));
+  const mag = w.magnetometer ? `qmc-${w.magnetometer.yAxis}` : 'none';
+  return (
+    <Group title="Buttons, compass and operator" note="Optional. For code that waits for button presses or reads an I²C compass.">
+      <div className="field wide-field">
+        <label htmlFor="btns">Buttons (NAME=pin)</label>
+        <div className="field-input"><input id="btns" value={btnText} placeholder="ZERO=2 LEFT=3 RIGHT=4"
+          onChange={(e) => setBtnText(e.target.value)}
+          onBlur={() => { if (!btn.errors.length) setW({ buttons: btn.buttons }); }} /></div>
+        {btn.errors.length > 0 && <p className="hint">{btn.errors.join(' ')}</p>}
+      </div>
+      <SelectField<'low' | 'high'> label="A pressed button reads" value={activeLow ? 'low' : 'high'}
+        onChange={(v) => setW({ buttons: (w.buttons ?? []).map((b) => ({ ...b, activeLow: v === 'low' })) })}
+        options={[{ value: 'low', label: 'LOW (button to GND, INPUT_PULLUP)' }, { value: 'high', label: 'HIGH (button to VCC, pull-down)' }]} />
+      <SelectField<'none' | 'qmc-left' | 'qmc-right'> label="Compass (I²C)" value={mag as 'none' | 'qmc-left' | 'qmc-right'}
+        onChange={(v) => setW({ magnetometer: v === 'none' ? null : { chip: 'QMC5883L', yAxis: v === 'qmc-left' ? 'left' : 'right' } })}
+        hint="Reports the true heading: no noise, no offsets, no motor interference. X arrow forward; with Y left, atan2(y, x) grows on a right turn."
+        options={[{ value: 'none', label: 'None' }, { value: 'qmc-left', label: 'QMC5883L at 0x0D, Y arrow left' }, { value: 'qmc-right', label: 'QMC5883L at 0x0D, Y arrow right' }]} />
+      <div className="field wide-field">
+        <label htmlFor="op">Operator script</label>
+        <textarea id="op" className="code-edit" rows={5} value={opText} spellCheck={false}
+          placeholder={'0.5 press ZERO\n8 place-at-start\n8.5 press RIGHT\n9.5 press ZERO'}
+          onChange={(e) => setOpText(e.target.value)}
+          onBlur={() => { if (!op.errors.length) setW({ operator: op.steps }); }} />
+        <p className="hint">One step per line, seconds from power-on: "&lt;time&gt; press &lt;BUTTON&gt; [hold s]" (hold 0.1 s by default) or "&lt;time&gt; place-at-start" (puts the robot back on the start; the run timer restarts). Applied when the field loses focus.</p>
+        {op.errors.length > 0 && <p className="hint">{op.errors.join(' ')}</p>}
+        {unknown.length > 0 && <p className="hint">Not a button above: {[...new Set(unknown)].join(', ')}.</p>}
+      </div>
+    </Group>
   );
 }

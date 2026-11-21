@@ -3,6 +3,11 @@
 Live app: https://vaibhavchandhok2006-code.github.io/LFSim/ · Spec: `docs/LFSim_Spec_v1.pdf` (then PRD.md, DECISIONS.md).
 
 ## Where we are
+- **21 Nov 2026: Code mode compass + buttons.** Arduino `Wire` with a simulated QMC5883L (true heading), push buttons
+  driven by an operator script (timed presses, put back at the start), `A0`–`A7`. Example: the user's Uno maze sketch
+  in `examples/magnetometer-maze/` runs on the website and the command line; it does not finish the sample track
+  (see that folder's README). Repo was reset to the end of LFSim Lab Phase 0 on 20 Nov (backup branch
+  `backup/before-reset-2026-11-20`); Phase 1 restarts from scratch with review checkpoints.
 - v1 (Phases 1–5) done.
 - **Independent Test Report: all 21 defects addressed.** 20 fixed and verified; D2 fixed on clean mazes, with a
   documented limit on the dense Robo-Run sample (below). 77 automated tests and the browser smoke test pass.

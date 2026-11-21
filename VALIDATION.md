@@ -111,3 +111,16 @@ CSV / PNG / HTML report / GIF (2.0 MB) downloads, dark theme. No page or worker 
 | `npm run lab -- doctor` on Linux | all four OK | pass (Node 22.23, Git 2.43, GCC 13.3, Claude Code 2.1) |
 | Speed (one core, sample track, 30 s run incl. track import) | measured | 14× real time; most of a short run is the one-off track import and junction graph (to be cached in Phase 1) |
 | Windows setup guide (2026-11-16, your HP laptop) | doctor all OK | pass (Node 26.13, Git 2.56, MSYS2 GCC 16.2, Claude Code 2.1.325); fixes needed on the way: add C:\Users\<you>\.local\bin to PATH after the Claude installer, and allow scripts with Set-ExecutionPolicy -Scope CurrentUser RemoteSigned |
+
+## Code mode: compass, buttons, operator script — 2026-11-21
+| Check | Expected | Result |
+| --- | --- | --- |
+| QMC5883L registers (src/brain/qmc5883l.test.ts): zeros before continuous mode, 3000 / 12000 counts per gauss, chip ID 0xFF, data held between 10 Hz samples | as datasheet | pass |
+| Heading sign: atan2(y, x) grows on a right turn with the Y arrow left, shrinks with it right | ±0.3 rad for a 0.3 rad turn | pass |
+| Firmware over Wire (firmware.test.ts): no device at 0x1E returns 2; button press seen at 500–510 ms; right turn reads positive; place-at-start resets pose and timer | as stated | pass |
+| Operator script / buttons text format and imported-file checks (operator.test.ts), incl. a non-list `buttons` (crashed before the fix) | errors, no crash | pass |
+| Example sketch through the robot-file import: calibrates, "Target bearing = 45", drives off | as stated | pass |
+| Website (headless Chrome, production build): import the example, Code panel shows buttons/compass/script, run at 4× | no page or worker errors; run time starts after the ZERO press | pass (run time 84.3 s at 94.5 s simulated, i.e. started at about 10.2 s); before the fix the page started the timer during the calibration spin |
+| Example on the sample track, 240 s, command line | — | does not finish: 14 junction scans, 1 off-line, stops at (1.24, 0.73) m after its finish test fires on a wide junction |
+| Same with TURN_MIN_PWM 95 / plus sensors 40 mm ahead of the axle / plus ADVANCE_MS 700 (what-ifs, not shipped) | — | none finish; with 40 mm the robot returns to the start square and takes it for the finish |
+| Full suite `npm test`, `npm run build`, `npm run typecheck:lab` | pass | pass (91 tests) |

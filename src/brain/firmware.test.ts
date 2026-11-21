@@ -162,3 +162,66 @@ describe('Code mode hardware API', () => {
     expect(v5.e.sim.dutyR).toBeCloseTo(0.3, 2);
   });
 });
+
+describe('Code mode: Wire compass, buttons and the operator script', () => {
+  const avr: Wiring = {
+    ...SAMPLE_WIRING, board: 'avr', sensorPins: [14, 15, 16, 17, 18, 19, 20, 21],
+    buttons: [{ name: 'GO', pin: 2, activeLow: true }],
+    magnetometer: { chip: 'QMC5883L', yAxis: 'left' },
+    operator: [{ at_s: 0.5, action: 'press', button: 'GO', hold_s: 0.2 }, { at_s: 3, action: 'place-at-start' }],
+  };
+
+  it('reads the button through the operator script and the heading over I²C', async () => {
+    const code = `
+      function heading() {
+        Wire.beginTransmission(0x0D); Wire.write(0x00); if (Wire.endTransmission(false) != 0) return NaN;
+        if (Wire.requestFrom(0x0D, 6) < 6) return NaN;
+        let x = Wire.read(); x |= Wire.read() << 8; x = (x << 16) >> 16;
+        let y = Wire.read(); y |= Wire.read() << 8; y = (y << 16) >> 16;
+        return Math.atan2(y, x) * RAD_TO_DEG;
+      }
+      async function setup() {
+        Serial.println('pins ' + A0 + ' ' + A7);
+        Wire.begin(); Wire.setClock(400000);
+        Wire.beginTransmission(0x1E); Serial.println('other ' + Wire.endTransmission());
+        Wire.beginTransmission(0x0D); Wire.write(0x09); Wire.write(0x1D); Wire.endTransmission();
+        while (digitalRead(2) == HIGH) { await arduinoYield(); }
+        Serial.println('pressed at ' + millis());
+        const h0 = heading();
+        digitalWrite(23, HIGH);                                                 // TB6612 standby off
+        digitalWrite(17, HIGH); digitalWrite(18, LOW); analogWrite(16, 90);    // left forward
+        digitalWrite(21, LOW); digitalWrite(22, HIGH); analogWrite(19, 90);    // right back: turn right
+        await delay(120);
+        analogWrite(16, 0); analogWrite(19, 0);
+        await delay(200);
+        Serial.println('turned ' + ((heading() - h0 + 540) % 360 - 180).toFixed(0));
+      }
+      async function loop() { await delay(100); }`;
+    const { e, logs } = await runCode(code, 4, avr);
+    expect(e.error).toBeUndefined();
+    expect(logs.some((l) => l.endsWith('pins 14 21'))).toBe(true);
+    expect(logs.some((l) => l.endsWith('other 2'))).toBe(true);                  // nothing at 0x1E
+    const at = Number(logs.find((l) => l.includes('pressed at'))!.split(' ').pop());
+    expect(at).toBeGreaterThanOrEqual(500); expect(at).toBeLessThan(510);
+    const turned = Number(logs.find((l) => l.includes('turned'))!.split(' ').pop());
+    expect(turned).toBeGreaterThan(20); expect(turned).toBeLessThan(170);
+    const bodyTurn = (e.sim.body.theta - track.startPose.theta) * 180 / Math.PI;
+    expect(bodyTurn).toBeCloseTo(0, 3); // (pose was reset at 3 s)                                  // right turn = positive (Y arrow left)
+    // the operator put the robot back on the start pose at 3 s
+    expect(e.sim.events.some((ev) => ev.text.includes('back at the start'))).toBe(true);
+    expect(e.sim.body.x).toBeCloseTo(track.startPose.x, 3);
+    expect(e.sim.startTime).toBeNull();
+  });
+
+  it('runs the magnetometer maze example to its first junction scan', async () => {
+    const fs = await import('node:fs');
+    const { parseImport } = await import('../ui/persist');
+    const imp = parseImport(fs.readFileSync('examples/magnetometer-maze/magnetometer-maze.robot.json', 'utf8'));
+    if (imp.kind !== 'robot' || !imp.code?.wiring || !imp.code.translated) throw new Error('not a robot file with firmware');
+    const { e, logs } = await runCode(imp.code.translated, 25, imp.code.wiring);
+    expect(e.error).toBeUndefined();
+    expect(logs.some((l) => l.includes('Cal offsets'))).toBe(true);
+    expect(logs.some((l) => l.endsWith('Target bearing = 45'))).toBe(true);
+    expect(e.sim.distance).toBeGreaterThan(0.3); // it drove off after the ZERO press
+  }, 30000);
+});

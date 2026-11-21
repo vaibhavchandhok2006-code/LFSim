@@ -15,7 +15,7 @@ export const DEFAULT_FLAGS: SimFlags = { motorMismatch: true, batterySag: true, 
 export interface OffLineRule { distance_cm: number }
 
 export interface TrailPoint { x: number; y: number; v: number; off: boolean }
-export interface SimEvent { t: number; kind: 'start' | 'finish' | 'offline' | 'online' | 'brain-finished' | 'code-stopped' | 'log' | 'left-mat' | 'start-reentry'; text: string; x: number; y: number }
+export interface SimEvent { t: number; kind: 'start' | 'finish' | 'offline' | 'online' | 'brain-finished' | 'code-stopped' | 'log' | 'left-mat' | 'start-reentry' | 'placed'; text: string; x: number; y: number }
 
 export interface DecisionEvent extends DecisionRecord { t: number; x: number; y: number }
 
@@ -147,6 +147,19 @@ export class Simulation {
   score(): number | null {
     const t = this.runTime();
     return t === null ? null : t + (this.offLineCount / 20) * t;
+  }
+
+  // Operator action: pick the robot up and put it on the start pose, still and with the motors as commanded. Used before
+  // the run (e.g. after a compass calibration spin elsewhere), so the run timer, distance and counters start again.
+  // Battery charge, wheel angles (encoders) and the robot's memory are kept, as on a real robot.
+  placeAtStart(reason: string): void {
+    const sp = this.track.startPose, b = this.body;
+    b.x = sp.x; b.y = sp.y; b.theta = sp.theta; b.vx = 0; b.vy = 0; b.omega = 0; b.wL = 0; b.wR = 0; b.slipping = false;
+    this.startTime = null; this.finishTime = null; this.distance = 0; this.offLineCount = 0; this.isOffLine = false;
+    this.offSinceJudge = false; this.inStart = true; this.leftMat = false; this.trail = [];
+    this.judge?.reset(b.x, b.y);
+    this.sensors.read(this.track, b.x, b.y, b.theta);
+    this.event('placed', reason);
   }
 
   stop() { if (this.status === 'running' || this.status === 'ready') this.status = 'stopped'; }

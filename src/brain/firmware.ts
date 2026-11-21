@@ -5,11 +5,15 @@
 import { Brain, BrainIO } from './brain';
 import { RobotProfile } from '../sim/profile';
 import type { Simulation } from '../sim/simulation';
-import type { Wiring } from '../worker/protocol';
+import type { OperatorStep, Wiring } from '../worker/protocol';
+import { Qmc5883l, QMC_ADDR } from './qmc5883l';
 
 const TICK = 0.001;
 // Seconds of simulated CPU time per call. analogRead: ESP32 ≈ 10 µs, AVR (Uno/Nano at 16 MHz, prescaler 128) ≈ 112 µs.
-const COST = { analogRead: 10e-6, analogReadAvr: 112e-6, digital: 0.2e-6, call: 0.5e-6, loopOverhead: 5e-6 };
+// digitalRead/digitalWrite: ESP32 ≈ 0.2 µs; AVR Arduino core ≈ 4 µs (pin lookup tables; estimate).
+const COST = { analogRead: 10e-6, analogReadAvr: 112e-6, digital: 0.2e-6, digitalAvr: 4e-6, call: 0.5e-6, loopOverhead: 5e-6 };
+// I²C: 9 bit times per byte (8 data + ACK) plus start/stop, and ≈ 10 µs of Wire library work per transaction (estimate).
+const I2C_OVERHEAD_S = 10e-6;
 const ESP_OK = 0, ESP_ERR_INVALID_ARG = 0x102;
 
 export class FirmwareStop extends Error {}
@@ -51,6 +55,18 @@ export class FirmwareBrain implements Brain {
     this.avr = wiring.board === 'avr';
     // The board's ADC sets the numbers the code reads: AVR is always 10-bit; ESP32 reads 12-bit by default.
     this.readBits = this.avr ? 10 : 12;
+    this.mag = wiring.magnetometer ? new Qmc5883l(wiring.magnetometer.yAxis === 'left') : null;
+    this.operator = [...(wiring.operator ?? [])].sort((a, b) => a.at_s - b.at_s);
+    this.placeTimes = this.operator.filter((o) => o.action === 'place-at-start').map((o) => o.at_s);
+  }
+  private mag: Qmc5883l | null;
+  private operator: OperatorStep[];
+  private placeTimes: number[];
+  private placeIdx = 0;
+  private now() { return this.sim.time + this.pending; }
+  // Is the named button held down at simulated time t (operator script)?
+  private buttonDown(name: string, t: number) {
+    return this.operator.some((o) => o.action === 'press' && o.button === name && t >= o.at_s && t < o.at_s + o.hold_s);
   }
   private avr: boolean;
   private pcntOffset = new Map<number, number>();     // PCNT unit -> count at the last clear
@@ -77,6 +93,10 @@ export class FirmwareBrain implements Brain {
       this.fireEncoderInterrupts();
       const both0 = this.sim.dutyL === 0 && this.sim.dutyR === 0;
       if (both0) { if (this.stoppedSince === null) this.stoppedSince = this.sim.time; } else this.stoppedSince = null;
+      while (this.placeIdx < this.placeTimes.length && this.sim.time >= this.placeTimes[this.placeIdx] - 1e-9) {
+        this.placeIdx += 1;
+        this.sim.placeAtStart('Operator put the robot back at the start');
+      }
       this.afterTick();
       if (this.sim.status === 'finished' || this.sim.status === 'stopped') throw new FirmwareStop('run ended');
     }
@@ -198,11 +218,14 @@ export class FirmwareBrain implements Brain {
     const delay = async (ms: number) => { self.runPhysics(Math.max(0, Number(ms)) / 1000); await self.yieldIfDue(); };
     const millis = () => Math.floor((self.sim.time + self.pending) * 1000);
     const micros = () => Math.floor((self.sim.time + self.pending) * 1e6);
-    const digitalWrite = (pin: number, v: number) => { self.cost(COST.digital); self.pinLevel.set(pin, v ? 1 : 0); self.pwmPinDuty.delete(pin); };
+    const dCost = self.avr ? COST.digitalAvr : COST.digital;
+    const digitalWrite = (pin: number, v: number) => { self.cost(dCost); self.pinLevel.set(pin, v ? 1 : 0); self.pwmPinDuty.delete(pin); };
     const digitalRead = (pin: number) => {
-      self.cost(COST.digital);
+      self.cost(dCost);
       const i = self.wiring.sensorPins.indexOf(pin);
       if (i >= 0) { const v = self.sensorRaw(i); const s = self.profile.sensor; return (s.blackRaw >= s.whiteRaw ? v > s.threshold : v < s.threshold) ? 1 : 0; }
+      const btn = self.wiring.buttons?.find((b) => b.pin === pin);
+      if (btn) { const down = self.buttonDown(btn.name, self.now()); return btn.activeLow ? (down ? 0 : 1) : (down ? 1 : 0); }
       return self.pinLevel.get(pin) ?? 0;
     };
     const setPwmPin = (pin: number, duty: number, bits: number) => { self.pwmPinDuty.set(pin, Math.max(0, Math.min(1, duty / (2 ** bits - 1)))); };
@@ -225,8 +248,41 @@ export class FirmwareBrain implements Brain {
         self.pwmPinDuty.set(g.gpio, duty);
       });
     };
+    // Arduino Wire (I²C master). Only the simulated QMC5883L answers (address 0x0D); other addresses NACK.
+    const wire = { clock: 100000, addr: -1, tx: [] as number[], rx: [] as number[] };
+    const i2cCost = (bytes: number) => self.cost((bytes * 9 + 2) / wire.clock + I2C_OVERHEAD_S);
+    const Wire = {
+      begin: () => {}, end: () => {},
+      setClock: (hz: number) => { wire.clock = Math.max(10000, Math.min(1000000, Number(hz) || 100000)); },
+      beginTransmission: (addr: number) => { wire.addr = Number(addr); wire.tx = []; },
+      write: (b: number | number[], n?: number) => {
+        const bytes = Array.isArray(b) ? b.slice(0, n ?? b.length) : [b];
+        const room = 32 - wire.tx.length; // AVR Wire buffer is 32 bytes
+        const take = bytes.slice(0, Math.max(0, room)).map((x) => Number(x) & 0xff);
+        wire.tx.push(...take); return take.length;
+      },
+      endTransmission: (_stop: boolean | number = true) => {
+        i2cCost(1 + wire.tx.length);
+        if (!self.mag || wire.addr !== QMC_ADDR) return 2; // 2 = address not acknowledged
+        self.mag.write(wire.tx); wire.tx = []; return 0;
+      },
+      requestFrom: (addr: number, n: number, _stop: boolean | number = true) => {
+        const count = Math.max(0, Math.min(32, Math.trunc(Number(n))));
+        i2cCost(1 + count);
+        if (!self.mag || Number(addr) !== QMC_ADDR) { wire.rx = []; return 0; }
+        wire.rx = self.mag.read(count, self.now(), self.sim.body.theta); return count;
+      },
+      available: () => wire.rx.length,
+      read: () => (wire.rx.length ? wire.rx.shift()! : -1),
+    };
+    // Arduino analog pin names for the chosen board.
+    const analogPins: Record<string, number> = self.avr
+      ? { A0: 14, A1: 15, A2: 16, A3: 17, A4: 18, A5: 19, A6: 20, A7: 21 }
+      : { A0: 36, A3: 39, A4: 32, A5: 33, A6: 34, A7: 35 };
     let rnd = 12345;
     const api: Record<string, unknown> = {
+      ...analogPins, Wire,
+      PI: Math.PI, HALF_PI: Math.PI / 2, TWO_PI: 2 * Math.PI, DEG_TO_RAD: Math.PI / 180, RAD_TO_DEG: 180 / Math.PI,
       HIGH: 1, LOW: 0, INPUT: 0, OUTPUT: 1, INPUT_PULLUP: 2, INPUT_PULLDOWN: 3, RISING: 'RISING', FALLING: 'FALLING', CHANGE: 'CHANGE',
       portTICK_PERIOD_MS: 1, pdMS_TO_TICKS: (ms: number) => ms, pdTRUE: 1, pdFALSE: 0,
       LEDC_LOW_SPEED_MODE: 0, LEDC_HIGH_SPEED_MODE: 1,

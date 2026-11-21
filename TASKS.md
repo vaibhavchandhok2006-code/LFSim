@@ -12,6 +12,15 @@ browser smoke test passes. Next: reality check against the real robot.
       D15 CSV; D18 PWM frequency labelled; D21 2 kHz loop and legend colour
 - [x] D2: grid maze — every algorithm finishes like the graph; stable over base 0.3–0.5 × 100–2000 Hz
 
+## Code mode additions (2026-11-21)
+- [x] Arduino `Wire` (I²C) with a simulated QMC5883L compass (true heading), `A0`–`A7`, `PI`/`RAD_TO_DEG` constants,
+      AVR `digitalRead` timing
+- [x] Push buttons + operator script (timed presses, put back at the start; the run timer restarts) in the robot file and
+      the Code panel; imported values checked
+- [x] Example `examples/magnetometer-maze/` (user's Uno sketch) runs in the website and the command line
+- [ ] That sketch does not finish the sample track (turn stall at PWM 70, 117 mm sensor arm vs 360° scan, corners read
+      as junctions, false finish on a wide junction) — the user decides what to change
+
 ## Known gaps
 - [ ] Robo-Run sample in Settings mode: the algorithms do not finish. 94 % of junctions are read right on straight
       approaches, but a few dense features are misread: the 5-way junction near (0.44, 1.03) m (branches 45° apart
